@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MFlash Maintenance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="login" class="login hidden">
+  <form id="loginForm" class="login-card">
+    <div class="brand-mark">M</div>
+    <h1>MFlash Maintenance</h1>
+    <p class="muted">Langganan Maintenance &amp; Service Corporate</p>
+    <label>Email<input type="email" name="email" required autocomplete="username"></label>
+    <label>Password<input type="password" name="password" required autocomplete="current-password"></label>
+    <button class="btn primary" type="submit">Masuk</button>
+    <p id="loginErr" class="err"></p>
+  </form>
+</div>
+
+<div id="app" class="layout hidden">
+  <aside class="side" id="side">
+    <div class="side-brand"><div class="brand-mark sm">M</div><div><b>MFlash</b><small>Maintenance</small></div></div>
+    <nav id="nav"></nav>
+    <div class="side-foot">
+      <div id="whoami"></div>
+      <button class="btn ghost sm" id="logout">Keluar</button>
+    </div>
+  </aside>
+  <main class="main">
+    <header class="top">
+      <button class="btn ghost sm menu-btn" id="menuBtn" aria-label="Menu">☰</button>
+      <h2 id="pageTitle"></h2>
+      <div class="top-right">
+        <select id="cabangFilter" class="hidden" aria-label="Filter cabang"></select>
+      </div>
+    </header>
+    <section id="view" class="view"></section>
+  </main>
+</div>
+
+<div id="modal" class="modal hidden"><div class="modal-card"><div class="modal-head"><h3 id="modalTitle"></h3><button class="x" id="modalX" aria-label="Tutup">×</button></div><div id="modalBody"></div></div></div>
+<div id="toast" class="toast hidden"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
