@@ -624,7 +624,7 @@ VIEWS.benefit = async () => {
 VIEWS.pengaturan = async () => {
   let tab = "paket";
   const draw = async () => {
-    $("#view").innerHTML = `<div class="tabs">${[["paket", "Paket"], ["benefit", "Benefit wajib"], ["umum", "Umum & target"], ["akun", "Akun"], ["log", "Log aktivitas"]].map(([k, l]) => `<button data-t="${k}" class="${tab === k ? "on" : ""}">${l}</button>`).join("")}</div><div id="tabBody"></div>`;
+    $("#view").innerHTML = `<div class="tabs">${[["paket", "Paket"], ["benefit", "Benefit wajib"], ["umum", "Umum & target"], ["akun", "Akun"], ["log", "Log aktivitas"], ["hapus", "Hapus data"]].map(([k, l]) => `<button data-t="${k}" class="${tab === k ? "on" : ""}">${l}</button>`).join("")}</div><div id="tabBody"></div>`;
     $$(".tabs button").forEach((b) => (b.onclick = () => { tab = b.dataset.t; draw(); }));
     const body = $("#tabBody");
     if (tab === "paket") {
@@ -686,13 +686,41 @@ VIEWS.pengaturan = async () => {
         toast("Akun tersimpan"); draw();
       };
     }
+    if (tab === "hapus") {
+      const L = {
+        transaksi: ["Transaksi saja", "Tagihan, kunjungan, benefit, dan riwayat pengingat. Akad & pelanggan tetap ada — catatan: sistem akan otomatis membuat ulang tagihan & kunjungan bulan ini dan bulan depan untuk akad yang masih aktif."],
+        akad: ["Transaksi + akad", "Semua di atas ditambah semua akad beserta unitnya. Pelanggan tetap ada. Nomor akad mulai lagi dari 0001 bila semua cabang dipilih."],
+        semua: ["Semua data operasional", "Semua di atas ditambah semua pelanggan. Aplikasi kembali kosong seperti baru dipasang."],
+      };
+      body.innerHTML = `<div class="card" style="border-color:var(--bad)"><h3 style="color:var(--bad)">Hapus data</h3>
+        <p class="muted" style="margin-top:-6px">Data yang dihapus <b>tidak bisa dikembalikan</b>. Bila perlu, ekspor dulu tabelnya ke CSV dari Supabase → Table Editor. Pengaturan paket, benefit, target, cabang, dan akun tidak ikut terhapus.</p>
+        <form class="form" id="f">
+          <div class="full" style="display:flex;flex-direction:column;gap:10px">${Object.entries(L).map(([k, [j, d]], i) => `<label class="chk" style="align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:10px 12px"><input type="radio" name="lingkup" value="${k}" ${i === 1 ? "checked" : ""} style="margin-top:3px"><span><b>${j}</b><br><span class="muted" style="font-weight:400">${d}</span></span></label>`).join("")}</div>
+          <label>Cabang<select name="cabang"><option value="">Semua cabang</option>${S.cabang.map((c) => `<option value="${c.id}">${esc(c.nama)}</option>`).join("")}</select></label>
+          <label><span>Ketik <b>HAPUS</b> untuk konfirmasi</span><input name="konfirmasi" autocomplete="off" placeholder="HAPUS"></label>
+          <div class="form-actions"><button class="btn primary" style="background:var(--bad);border-color:var(--bad)" id="hapusBtn">Hapus data</button></div>
+        </form><div id="hasil"></div></div>`;
+      $("#f").onsubmit = async (e) => {
+        e.preventDefault(); const v = fd(e.target);
+        if (v.konfirmasi !== "HAPUS") return toast("Ketik HAPUS (huruf besar) untuk konfirmasi", true);
+        const nmCab = v.cabang ? "cabang " + cabangNama(+v.cabang) : "SEMUA cabang";
+        if (!confirm(`Yakin hapus "${L[v.lingkup][0]}" untuk ${nmCab}? Tindakan ini tidak bisa dibatalkan.`)) return;
+        const btn = $("#hapusBtn"); btn.disabled = true; btn.textContent = "Menghapus…";
+        const res = await sb.rpc("hapus_data", { p_lingkup: v.lingkup, p_cabang: v.cabang ? +v.cabang : null });
+        btn.disabled = false; btn.textContent = "Hapus data";
+        if (res.error) return toast(res.error.message, true);
+        const h = res.data; e.target.konfirmasi.value = "";
+        $("#hasil").innerHTML = `<p style="margin-top:12px"><span class="badge b-good">Berhasil</span> Terhapus: ${h.tagihan} tagihan, ${h.kunjungan} kunjungan, ${h.benefit} benefit, ${h.akad} akad, ${h.pelanggan} pelanggan (${esc(nmCab)}).</p>`;
+        await hitungPengingat(); renderNav("pengaturan", S.jumlahPengingat);
+      };
+    }
     if (tab === "log") {
       const [rows, akun] = await Promise.all([sb.from("log_aktivitas").select("*").order("created_at", { ascending: false }).limit(200), sb.rpc("daftar_akun")]);
       const nm = Object.fromEntries((akun.data || []).map((a) => [a.user_id, a.nama]));
       const aksi = { insert: "menambah", update: "mengubah", delete: "menghapus" };
       body.innerHTML = `<div class="tbl-wrap">${(rows.data || []).length ? `<table><thead><tr><th>Waktu</th><th>Pengguna</th><th>Aktivitas</th><th>Ringkasan</th></tr></thead><tbody>${rows.data.map((r) => {
         const d = r.detail?.sesudah || r.detail || {}; const b = r.detail?.sebelum;
-        const ubah = b ? Object.keys(d).filter((k) => JSON.stringify(d[k]) !== JSON.stringify(b[k]) && !/url|_at$/.test(k)).map((k) => `${k}: ${b[k] ?? "-"} → ${d[k] ?? "-"}`).join(", ") : d.nomor || d.nama || "";
+        const ubah = r.aksi === "hapus massal" ? `${r.ref_id} — ` + Object.entries(r.detail || {}).map(([k, v]) => `${k} ${v}`).join(", ") : b ? Object.keys(d).filter((k) => JSON.stringify(d[k]) !== JSON.stringify(b[k]) && !/url|_at$/.test(k)).map((k) => `${k}: ${b[k] ?? "-"} → ${d[k] ?? "-"}`).join(", ") : d.nomor || d.nama || "";
         return `<tr><td>${new Date(r.created_at).toLocaleString("id-ID")}</td><td>${esc(nm[r.user_id] || "-")}</td><td>${aksi[r.aksi] || r.aksi} ${esc(r.tabel)}</td><td><small style="color:var(--ink-2)">${esc(String(ubah).slice(0, 200))}</small></td></tr>`; }).join("")}</tbody></table>` : `<div class="empty">Belum ada aktivitas.</div>`}</div>`;
     }
   };
