@@ -6,14 +6,16 @@
 <title>MFlash Maintenance</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<meta name="theme-color" content="#0b2d63">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div id="login" class="login hidden">
   <form id="loginForm" class="login-card">
-    <div class="brand-mark">M</div>
-    <h1>MFlash Maintenance</h1>
-    <p class="muted">Langganan Maintenance &amp; Service Corporate</p>
+    <img src="logo.png" class="logo-login" alt="MFlash Maintenance &amp; Service Corporate">
+    <p class="muted login-sub">Masuk untuk melanjutkan</p>
     <label>Username atau email<input type="text" name="email" required autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="contoh: klender"></label>
     <label>Password<input type="password" name="password" required autocomplete="current-password"></label>
     <button class="btn primary" type="submit">Masuk</button>
@@ -23,7 +25,7 @@
 
 <div id="app" class="layout hidden">
   <aside class="side" id="side">
-    <div class="side-brand"><div class="brand-mark sm">M</div><div><b>MFlash</b><small>Maintenance</small></div></div>
+    <div class="side-brand"><img src="logo.png" class="logo-side" alt="MFlash Maintenance &amp; Service Corporate"></div>
     <nav id="nav"></nav>
     <div class="side-foot">
       <div id="whoami"></div>
