@@ -1,6 +1,6 @@
 /* MFlash Maintenance & Service — aplikasi langganan (Supabase + JS murni) */
 const sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
-const S = { user: null, profil: null, cabang: [], paket: null, benefit: [], set: {}, fc: "" };
+const S = { user: null, profil: null, cabang: [], paket: null, pakets: [], benefit: [], set: {}, fc: "" };
 const charts = [];
 
 /* ---------- utilitas ---------- */
@@ -21,6 +21,24 @@ const addMonth = (p, n) => { const d = new Date(p + "T00:00:00"); d.setMonth(d.g
 const isAdmin = () => S.profil?.peran === "super_admin";
 const cabangNama = (id) => S.cabang.find((c) => c.id === id)?.nama || "-";
 const setting = (k, d = "") => S.set[k] ?? d;
+/* ---------- paket bertingkat (Basic · Silver · Gold · Star) ---------- */
+const paketTier = () => S.pakets.filter((p) => p.aktif && p.kode).sort((a, b) => a.unit_min - b.unit_min);
+const paketById = (id) => S.pakets.find((p) => p.id === id) || null;
+function paketUntuk(n) { const L = paketTier(); if (!L.length) return S.paket; let r = L[0]; for (const p of L) if (n >= (p.unit_min || 0)) r = p; return r; }
+const rentangUnit = (p) => p?.kode ? (p.unit_max ? `${p.unit_min}–${p.unit_max} unit` : `${p.unit_min} unit ke atas`) : "";
+const responTeks = (j) => (j % 24 === 0 ? `${j / 24}×24 jam` : `${j} jam`);
+function ketPaket(p) {
+  if (!p) return [];
+  const k = [];
+  if (p.diskon_jasa >= 100) k.push("Gratis biaya jasa servis perbaikan"); else if (p.diskon_jasa > 0) k.push(`Diskon jasa servis perbaikan ${p.diskon_jasa}%`);
+  if (p.diskon_sparepart > 0) k.push(`Diskon sparepart ${p.diskon_sparepart}%`);
+  if (p.respon_jam) k.push(`Respon kerusakan maksimal ${responTeks(p.respon_jam)}`);
+  if (p.bonus_ac_unit > 0) k.push(`Bonus servis ${p.bonus_ac_unit} unit AC + tambah freon per tahun`);
+  if (p.diskon_sewa > 0) k.push(`Diskon sewa laptop MFlash ${p.diskon_sewa}%`);
+  return k.concat(p.keuntungan || []);
+}
+const benefitUntuk = (p) => S.benefit.filter((b) => b.aktif && (!b.paket_kode || !b.paket_kode.length || (p?.kode && b.paket_kode.includes(p.kode))));
+const paketBadge = (p) => p ? `<span class="badge b-paket p-${esc(p.kode || "std")}">${esc(p.nama)}</span>` : "-";
 
 function toast(msg, bad = false) {
   const t = $("#toast"); t.textContent = msg; t.className = "toast" + (bad ? " bad" : "");
@@ -138,10 +156,10 @@ async function boot() {
 }
 async function muatMaster() {
   const [c, p, b, s] = await Promise.all([
-    sb.from("cabang").select("*").order("nama"), sb.from("paket").select("*").eq("aktif", true).order("id").limit(1),
+    sb.from("cabang").select("*").order("nama"), sb.from("paket").select("*").order("urutan").order("id"),
     sb.from("benefit").select("*").order("id"), sb.from("pengaturan").select("*"),
   ]);
-  S.cabang = c.data || []; S.paket = (p.data || [])[0] || null; S.benefit = b.data || [];
+  S.cabang = c.data || []; S.pakets = p.data || []; S.paket = paketTier()[0] || S.pakets.find((x) => x.aktif) || null; S.benefit = b.data || [];
   S.set = Object.fromEntries((s.data || []).map((r) => [r.kunci, r.nilai]));
 }
 $("#loginForm").onsubmit = async (e) => {
@@ -166,11 +184,14 @@ const VIEWS = {};
 /* ---------- DASHBOARD ---------- */
 VIEWS.dashboard = async () => {
   const p0 = bulanIni(), p6 = addMonth(p0, -5);
-  const [kpi, bul, kun, ping] = await Promise.all([
+  const [kpi, bul, kun, ping, pk] = await Promise.all([
     q("v_kpi_cabang"), q("v_bulanan").gte("periode", p6).lte("periode", p0),
     q("kunjungan", "status").eq("periode", p0), q("v_pengingat").order("sisa_hari").limit(8),
+    q("v_paket_ringkas"),
   ]);
   const K = cek(kpi), B = cek(bul), KU = cek(kun), P = cek(ping);
+  const PK = (pk.data || []).reduce((m, r) => { const x = m[r.paket_id] || (m[r.paket_id] = { akad: 0, unit: 0, mrr: 0 }); x.akad += +r.akad_aktif; x.unit += +r.unit_aktif; x.mrr += +r.mrr; return m; }, {});
+  const paketRows = S.pakets.filter((p) => p.aktif || PK[p.id]?.akad);
   const sum = (arr, k) => arr.reduce((a, r) => a + Number(r[k] || 0), 0);
   const mitra = sum(K, "mitra_aktif");
   const target = isAdmin() && !S.fc ? Number(setting("target_mitra_aktif", 162)) : null;
@@ -201,6 +222,7 @@ VIEWS.dashboard = async () => {
     <div class="card"><h3>Gross profit, 6 bulan</h3><div class="legend">&nbsp;</div>
       <div class="chart-box"><canvas id="c2" aria-label="Grafik gross profit 6 bulan"></canvas></div></div>
   </div>
+  <div class="card"><h3>Akad aktif per paket</h3><div class="paket-grid">${paketRows.map((p) => { const x = PK[p.id] || { akad: 0, unit: 0, mrr: 0 }; return `<div class="paket-cell">${paketBadge(p)}<div class="val">${x.akad}<span class="muted"> akad</span></div><small class="muted">${x.unit} unit · ${rpJt(x.mrr)} / bln</small></div>`; }).join("")}</div></div>
   <div class="card"><div class="card-head"><h3>Perlu tindakan</h3><a class="btn sm" href="#/pengingat">Lihat semua</a></div>
     ${P.length ? `<div class="tbl-wrap"><table><thead><tr><th>Jenis</th><th>Pelanggan</th><th>Tanggal</th><th>Status</th><th></th></tr></thead><tbody>
     ${P.map((r) => `<tr><td>${labelJenis(r.jenis)}</td><td>${esc(r.pelanggan)}<small>${esc(r.cabang)} · ${esc(r.nomor_akad)}</small></td><td>${tgl(r.tanggal)}</td><td>${hariBadge(r.sisa_hari)}</td><td class="act"><button class="btn wa sm" data-wa='${esc(JSON.stringify(r))}'>WhatsApp</button></td></tr>`).join("")}
@@ -300,8 +322,8 @@ VIEWS.akad = async (id) => {
   const draw = () => {
     const list = rows.filter((r) => !st || r.status === st);
     $("#view").innerHTML = `<div class="toolbar"><select id="st"><option value="">Semua status</option>${["menunggu_ttd", "aktif", "ditangguhkan", "berakhir", "batal"].map((s) => `<option ${s === st ? "selected" : ""} value="${s}">${s.replace("_", " ")}</option>`).join("")}</select><span class="spacer"></span><button class="btn primary" id="baru">+ Akad baru</button></div>
-    <div class="tbl-wrap">${list.length ? `<table><thead><tr><th>No. Akad</th><th>Pelanggan</th>${isAdmin() ? "<th>Cabang</th>" : ""}<th class="num">Unit</th><th class="num">Per bulan</th><th>Masa berlaku</th><th>Status</th><th></th></tr></thead><tbody>
-    ${list.map((r) => `<tr><td><b>${esc(r.nomor)}</b></td><td>${esc(r.pelanggan?.nama)}<small>${esc(r.pelanggan?.nama_pic || "")}</small></td>${isAdmin() ? `<td>${esc(cabangNama(r.cabang_id))}</td>` : ""}<td class="num">${r.jumlah_unit}</td><td class="num">${rp(r.harga_bulanan)}</td><td>${tgl(r.tgl_mulai)} – ${tgl(r.tgl_selesai)}<small>${r.durasi_bulan} bulan${r.perpanjang_otomatis ? " · perpanjang otomatis" : ""}</small></td><td>${stBadge(r.status)}</td><td class="act"><a class="btn sm" href="#/akad/${r.id}">${r.status === "menunggu_ttd" ? "Tanda tangan" : "Buka"}</a>${btnHapus("akad", r.id, "akad " + r.nomor + " (" + (r.pelanggan?.nama || "") + ")")}</td></tr>`).join("")}
+    <div class="tbl-wrap">${list.length ? `<table><thead><tr><th>No. Akad</th><th>Pelanggan</th>${isAdmin() ? "<th>Cabang</th>" : ""}<th>Paket</th><th class="num">Unit</th><th class="num">Per bulan</th><th>Masa berlaku</th><th>Status</th><th></th></tr></thead><tbody>
+    ${list.map((r) => `<tr><td><b>${esc(r.nomor)}</b></td><td>${esc(r.pelanggan?.nama)}<small>${esc(r.pelanggan?.nama_pic || "")}</small></td>${isAdmin() ? `<td>${esc(cabangNama(r.cabang_id))}</td>` : ""}<td>${paketBadge(paketById(r.paket_id))}</td><td class="num">${r.jumlah_unit}</td><td class="num">${rp(r.harga_bulanan)}</td><td>${tgl(r.tgl_mulai)} – ${tgl(r.tgl_selesai)}<small>${r.durasi_bulan} bulan${r.perpanjang_otomatis ? " · perpanjang otomatis" : ""}</small></td><td>${stBadge(r.status)}</td><td class="act"><a class="btn sm" href="#/akad/${r.id}">${r.status === "menunggu_ttd" ? "Tanda tangan" : "Buka"}</a>${btnHapus("akad", r.id, "akad " + r.nomor + " (" + (r.pelanggan?.nama || "") + ")")}</td></tr>`).join("")}
     </tbody></table>` : `<div class="empty">Belum ada akad.</div>`}</div>`;
     $("#st").onchange = (e) => { st = e.target.value; draw(); };
     $("#baru").onclick = () => formAkad();
@@ -311,41 +333,61 @@ VIEWS.akad = async (id) => {
 };
 
 async function formAkad(pelangganId = "") {
-  if (!S.paket) return toast("Super Admin perlu mengisi harga paket di Pengaturan dulu.", true);
+  if (!S.paket) return toast("Super Admin perlu mengisi paket di Pengaturan dulu.", true);
   const pel = cek(await q("pelanggan", "id,nama,cabang_id").order("nama"));
-  const P = S.paket;
+  let P = paketUntuk(1);
   modal("Akad langganan baru", `<form class="form" id="f">
     <label class="full">Pelanggan<div class="row"><select name="pelanggan_id" required style="flex:1"><option value="">Pilih pelanggan</option>${pel.map((p) => `<option value="${p.id}" data-c="${p.cabang_id}" ${p.id === pelangganId ? "selected" : ""}>${esc(p.nama)}${isAdmin() ? " — " + esc(cabangNama(p.cabang_id)) : ""}</option>`).join("")}</select><button type="button" class="btn" id="pelBaru">+ Baru</button></div></label>
+    <label>Jumlah unit (PC, laptop, HP)<input type="number" name="jumlah_unit" id="jml" min="1" value="5" required></label>
     <label>Tanggal mulai<input type="date" name="tgl_mulai" required value="${today()}"></label>
-    <label>Durasi (bulan)<input type="number" name="durasi_bulan" min="${P.durasi_min_bulan}" value="${P.durasi_min_bulan}" required></label>
+    <div class="full paket-box" id="paketInfo"></div>
+    <label>Durasi (bulan)<input type="number" name="durasi_bulan" id="durasi" min="1" value="${P.durasi_min_bulan}" required></label>
     <label>Tanggal jatuh tempo tiap bulan<input type="number" name="tgl_tagih" min="1" max="28" value="10" required></label>
-    <label>Biaya langganan / bulan (Rp)<input type="number" name="harga_bulanan" id="harga" min="0" step="1000" required value="${P.harga_bulanan}"></label>
+    <label class="full">Biaya langganan / bulan (Rp)<input type="number" name="harga_bulanan" id="harga" min="0" step="1000" required><small class="muted" id="hargaKet"></small></label>
     <label class="chk full"><input type="checkbox" name="perpanjang_otomatis" checked> Perpanjang otomatis 12 bulan bila tidak dihentikan</label>
-    <div class="full units-edit"><div class="row" style="justify-content:space-between;margin-bottom:6px"><b>Unit / mesin yang di-maintain</b><button type="button" class="btn sm" id="addU">+ Unit</button></div><div id="units"></div>
-      <small class="muted">Harga paket standar: ${rp(P.harga_bulanan)} per unit per bulan, ${P.kunjungan_per_bulan}× kunjungan per bulan.</small></div>
+    <div class="full units-edit"><div class="row" style="justify-content:space-between;margin-bottom:6px"><b>Rincian unit (lampiran akad)</b><span><button type="button" class="btn sm" id="addU">+ Unit</button> <button type="button" class="btn sm" id="addU10">+ 10</button></span></div><div id="units"></div>
+      <small class="muted">Boleh diisi sebagian dulu; jumlah unit untuk paket &amp; tagihan mengikuti kolom "Jumlah unit".</small></div>
     <label class="full">Catatan<textarea name="catatan" rows="2"></textarea></label>
     <div class="form-actions"><button type="button" class="btn" onclick="tutupModal()">Batal</button><button class="btn primary">Buat akad &amp; lanjut tanda tangan</button></div></form>`, (el) => {
-    const units = $("#units", el), harga = $("#harga", el);
-    let hargaDiubah = false; harga.oninput = () => (hargaDiubah = true);
+    const units = $("#units", el), harga = $("#harga", el), jml = $("#jml", el), info = $("#paketInfo", el);
+    let hargaDiubah = false; harga.oninput = () => { hargaDiubah = true; ketHarga(); };
+    const ketHarga = () => {
+      const n = +jml.value || 0, std = P.harga_bulanan * n;
+      $("#hargaKet", el).textContent = +harga.value === std ? `${rp(P.harga_bulanan)} × ${n} unit (harga paket ${P.nama})` : `Harga paket ${P.nama}: ${rp(std)} — harga diubah manual`;
+    };
+    const upd = () => {
+      const n = Math.max(1, +jml.value || 1); P = paketUntuk(n);
+      const kurang = P.kode && n < P.unit_min;
+      info.innerHTML = `<div class="row" style="gap:10px;align-items:center">${paketBadge(P)}<b>${rp(P.harga_bulanan)}</b><span class="muted">/ unit / bulan · ${esc(rentangUnit(P))}</span></div>
+        ${kurang ? `<p class="err" style="margin:6px 0 0">Paket ${esc(P.nama)} minimal ${P.unit_min} unit. Akad tetap bisa dibuat dengan harga ${esc(P.nama)}.</p>` : ""}
+        <ul>${ketPaket(P).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
+      const d = $("#durasi", el); d.min = P.durasi_min_bulan; if (+d.value < P.durasi_min_bulan) d.value = P.durasi_min_bulan;
+      if (!hargaDiubah) harga.value = P.harga_bulanan * n;
+      ketHarga();
+    };
     const addU = () => {
       const d = document.createElement("div"); d.className = "u";
       d.innerHTML = `<input placeholder="Merk" name="u_merk"><input placeholder="Tipe" name="u_tipe"><input placeholder="No. seri" name="u_seri"><input placeholder="Lokasi" name="u_lokasi"><button type="button" class="btn sm danger" aria-label="Hapus unit">×</button>`;
-      d.querySelector("button").onclick = () => { if (units.children.length > 1) { d.remove(); upd(); } };
-      units.append(d); upd();
+      d.querySelector("button").onclick = () => d.remove();
+      units.append(d);
+      if (units.children.length > (+jml.value || 0)) { jml.value = units.children.length; upd(); }
     };
-    const upd = () => { if (!hargaDiubah) harga.value = P.harga_bulanan * units.children.length; };
-    $("#addU", el).onclick = addU; addU();
+    jml.oninput = upd;
+    $("#addU", el).onclick = addU; $("#addU10", el).onclick = () => { for (let i = 0; i < 10; i++) addU(); };
+    upd();
     $("#pelBaru", el).onclick = () => formPelanggan({}, (row) => formAkad(row.id));
     $("#f", el).onsubmit = async (e) => {
       e.preventDefault(); const f = e.target; const v = fd(f);
       const sel = f.pelanggan_id.selectedOptions[0];
-      const unitRows = $$(".u", units).map((u) => ({ merk: u.children[0].value, tipe: u.children[1].value, no_seri: u.children[2].value, lokasi: u.children[3].value }));
+      const unitRows = $$(".u", units).map((u) => ({ merk: u.children[0].value.trim(), tipe: u.children[1].value.trim(), no_seri: u.children[2].value.trim(), lokasi: u.children[3].value.trim() }))
+        .filter((u) => u.merk || u.tipe || u.no_seri || u.lokasi);
+      const n = Math.max(+v.jumlah_unit || 1, unitRows.length);
       const ak = cek(await sb.from("akad").insert({
-        pelanggan_id: v.pelanggan_id, cabang_id: +sel.dataset.c, paket_id: P.id, jumlah_unit: unitRows.length,
+        pelanggan_id: v.pelanggan_id, cabang_id: +sel.dataset.c, paket_id: paketUntuk(n).id, jumlah_unit: n,
         harga_bulanan: +v.harga_bulanan, tgl_mulai: v.tgl_mulai, durasi_bulan: +v.durasi_bulan, tgl_tagih: +v.tgl_tagih,
         perpanjang_otomatis: !!v.perpanjang_otomatis, status: "menunggu_ttd", catatan: v.catatan || null,
       }).select().single());
-      cek(await sb.from("akad_unit").insert(unitRows.map((u) => ({ ...u, akad_id: ak.id }))));
+      if (unitRows.length) cek(await sb.from("akad_unit").insert(unitRows.map((u) => ({ ...u, akad_id: ak.id }))));
       tutupModal(); location.hash = "#/akad/" + ak.id;
     };
   });
@@ -354,20 +396,21 @@ async function formAkad(pelangganId = "") {
 /* isi pasal akad — dipakai untuk tampilan layar & PDF */
 function pasalAkad(ak, pl, units) {
   const pt = setting("nama_perusahaan", "MFlash");
-  const P = S.paket || {};
-  const ben = S.benefit.filter((b) => b.aktif);
+  const P = paketById(ak.paket_id) || S.paket || {};
+  const ben = benefitUntuk(P);
+  const ket = ketPaket(P);
   const frek = { bulanan: "setiap bulan", triwulan: "setiap 3 bulan", semester: "setiap 6 bulan", tahunan: "setiap tahun", sekali: "satu kali di awal masa langganan" };
   return [
-    ["Pasal 1 — Objek Perjanjian", [`${pt} ("Penyedia") memberikan layanan maintenance dan service berkala atas ${units.length} unit milik ${pl.nama} ("Pelanggan") sebagaimana tercantum dalam Lampiran Unit.`]],
+    ["Pasal 1 — Objek Perjanjian", [`${pt} ("Penyedia") memberikan layanan maintenance dan service berkala atas ${ak.jumlah_unit} unit milik ${pl.nama} ("Pelanggan") sebagaimana tercantum dalam Lampiran Unit.`]],
     ["Pasal 2 — Biaya Langganan dan Pembayaran", [
-      `Biaya langganan sebesar ${rp(ak.harga_bulanan)} per bulan.`,
+      P.kode ? `Pelanggan berlangganan Paket ${P.nama} (${rentangUnit(P)}) untuk ${ak.jumlah_unit} unit dengan biaya langganan sebesar ${rp(ak.harga_bulanan)} per bulan.` : `Biaya langganan sebesar ${rp(ak.harga_bulanan)} per bulan.`,
       `Tagihan diterbitkan setiap bulan dan wajib dibayar paling lambat tanggal ${ak.tgl_tagih} bulan berjalan ke rekening ${setting("rekening_pembayaran", "yang ditunjuk Penyedia")}.`,
       `Keterlambatan pembayaran lebih dari 14 hari memberi hak kepada Penyedia untuk menangguhkan layanan sampai tagihan dilunasi.`]],
     ["Pasal 3 — Kunjungan Maintenance", [
       `Penyedia melakukan ${P.kunjungan_per_bulan || 1} kali kunjungan maintenance setiap bulan pada jadwal yang disepakati.`,
       `Setiap kunjungan dituangkan dalam berita acara yang ditandatangani Pelanggan.`,
       `Penggantian suku cadang di luar cakupan paket ditagihkan terpisah setelah disetujui Pelanggan.`]],
-    ["Pasal 4 — Benefit Pelanggan (Kewajiban Penyedia)", ben.length ? ben.map((b) => `${b.nama}${b.deskripsi ? " — " + b.deskripsi : ""} (${frek[b.frekuensi]}).`) : ["Sesuai ketentuan paket yang berlaku."]],
+    ["Pasal 4 — Benefit Pelanggan (Kewajiban Penyedia)", (() => { const isi = ket.map((x) => x + ".").concat(ben.map((b) => `${b.nama}${b.deskripsi ? " — " + b.deskripsi : ""} (${frek[b.frekuensi]}).`)); return isi.length ? isi : ["Sesuai ketentuan paket yang berlaku."]; })()],
     ["Pasal 5 — Jangka Waktu", [
       `Perjanjian berlaku ${ak.durasi_bulan} bulan, terhitung ${tglP(ak.tgl_mulai)} sampai ${tglP(ak.tgl_selesai)}.`,
       ak.perpanjang_otomatis ? `Perjanjian diperpanjang otomatis masing-masing 12 bulan, kecuali salah satu pihak memberitahukan penghentian secara tertulis paling lambat 30 hari sebelum berakhir.` : `Perjanjian berakhir pada tanggal tersebut dan dapat diperpanjang dengan akad baru.`]],
@@ -399,10 +442,11 @@ async function detailAkad(id) {
     <h1>PERJANJIAN BERLANGGANAN MAINTENANCE &amp; SERVICE</h1><div class="nomor">No. ${esc(ak.nomor)}</div>
     <dl class="kv"><dt>Penyedia</dt><dd>${esc(setting("nama_perusahaan", "MFlash"))} — Cabang ${esc(cabangNama(ak.cabang_id))}</dd>
       <dt>Pelanggan</dt><dd>${esc(pl.nama)}</dd><dt>Diwakili</dt><dd>${esc(pl.nama_pic || "-")}${pl.jabatan_pic ? ", " + esc(pl.jabatan_pic) : ""}</dd>
-      <dt>Alamat</dt><dd>${esc(pl.alamat || "-")}</dd><dt>NPWP</dt><dd>${esc(pl.npwp || "-")}</dd></dl>
+      <dt>Alamat</dt><dd>${esc(pl.alamat || "-")}</dd><dt>NPWP</dt><dd>${esc(pl.npwp || "-")}</dd>
+      <dt>Paket</dt><dd>${paketBadge(paketById(ak.paket_id))} ${ak.jumlah_unit} unit · ${rp(ak.harga_bulanan)} / bulan</dd></dl>
     ${pasal.map(([j, isi]) => `<h4>${esc(j)}</h4>${isi.length > 1 ? `<ol>${isi.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>` : `<p>${esc(isi[0])}</p>`}`).join("")}
-    <h4>Lampiran Unit</h4>
-    <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Merk</th><th>Tipe</th><th>No. seri</th><th>Lokasi</th></tr></thead><tbody>${units.map((u, i) => `<tr><td>${i + 1}</td><td>${esc(u.merk || "-")}</td><td>${esc(u.tipe || "-")}</td><td>${esc(u.no_seri || "-")}</td><td>${esc(u.lokasi || "-")}</td></tr>`).join("")}</tbody></table></div>
+    <div class="row" style="justify-content:space-between;align-items:center"><h4>Lampiran Unit <span class="muted" style="font-weight:400">(${units.length} dari ${ak.jumlah_unit} unit terinci)</span></h4>${units.length < ak.jumlah_unit ? `<button class="btn sm" id="tambahUnit" type="button">+ Tambah rincian unit</button>` : ""}</div>
+    <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Merk</th><th>Tipe</th><th>No. seri</th><th>Lokasi</th></tr></thead><tbody>${units.length ? "" : `<tr><td colspan="5" class="muted">Rincian ${ak.jumlah_unit} unit menyusul.</td></tr>`}${units.map((u, i) => `<tr><td>${i + 1}</td><td>${esc(u.merk || "-")}</td><td>${esc(u.tipe || "-")}</td><td>${esc(u.no_seri || "-")}</td><td>${esc(u.lokasi || "-")}</td></tr>`).join("")}</tbody></table></div>
     <div class="sig-row">
       <div class="sig"><b>Pelanggan</b>${perluTtd ? `<input id="namaTtd" placeholder="Nama penanda tangan" value="${esc(pl.nama_pic || "")}"><canvas id="padP"></canvas><button class="btn sm" id="clrP" type="button">Ulangi</button>` : `${urlP ? `<img src="${urlP}" alt="Tanda tangan pelanggan">` : ""}<div>${esc(ak.ttd_nama_penanda || "")}<small class="muted" style="display:block">${ak.ttd_pelanggan_at ? new Date(ak.ttd_pelanggan_at).toLocaleString("id-ID") : ""}</small></div>`}</div>
       <div class="sig"><b>${esc(setting("nama_perusahaan", "MFlash"))}</b>${perluTtd ? `<input disabled value="${esc(S.profil.nama)}"><canvas id="padM"></canvas><button class="btn sm" id="clrM" type="button">Ulangi</button>` : `${urlM ? `<img src="${urlM}" alt="Tanda tangan MFlash">` : ""}<div>${ak.ttd_mflash_at ? new Date(ak.ttd_mflash_at).toLocaleString("id-ID") : ""}</div>`}</div>
@@ -416,6 +460,18 @@ async function detailAkad(id) {
   </div><div class="card"><h3>Benefit</h3>${miniTable((kb.data || []).map((r) => ({ ...r, nama: r.benefit?.nama })), ["periode", "nama", "batas_waktu", "status"])}</div>` : ""}`;
 
   pasangHapus(() => (location.hash = "#/akad"));
+  if ($("#tambahUnit")) $("#tambahUnit").onclick = () => modal("Tambah rincian unit", `<form class="form" id="fu">
+      <label class="full">Satu unit per baris: Merk, Tipe, No. seri, Lokasi<textarea name="baris" rows="10" placeholder="Lenovo, ThinkPad E14, PF3ABC12, Ruang Guru&#10;Asus, Vivobook 14, N4XYZ98, Lab Komputer" required></textarea></label>
+      <small class="muted full">Bisa ditempel langsung dari Excel (kolom dipisah tab atau koma). Maksimal ${ak.jumlah_unit - units.length} unit lagi.</small>
+      <div class="form-actions"><button type="button" class="btn" onclick="tutupModal()">Batal</button><button class="btn primary">Simpan</button></div></form>`, (el) => {
+    $("#fu", el).onsubmit = async (e) => {
+      e.preventDefault();
+      const rows = fd(e.target).baris.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, ak.jumlah_unit - units.length)
+        .map((l) => { const c = l.split(/\t|,/).map((x) => x.trim()); return { akad_id: ak.id, merk: c[0] || null, tipe: c[1] || null, no_seri: c[2] || null, lokasi: c.slice(3).join(", ") || null }; });
+      if (!rows.length) return toast("Belum ada baris unit", true);
+      cek(await sb.from("akad_unit").insert(rows)); tutupModal(); toast(rows.length + " unit tersimpan"); router();
+    };
+  });
   $$("[data-s]").forEach((b) => (b.onclick = async () => {
     const s = b.dataset.s;
     if (!confirm(`Ubah status akad menjadi "${s}"? ${s !== "aktif" ? "Tagihan, kunjungan, dan benefit ke depan yang belum berjalan akan dibatalkan." : ""}`)) return;
@@ -485,11 +541,12 @@ function buatPdfAkad(ak, pl, units, pasal, imgP, imgM) {
   d.setFont("helvetica", "bold"); d.setFontSize(13);
   d.text("PERJANJIAN BERLANGGANAN MAINTENANCE & SERVICE", W / 2, y, { align: "center" }); y += 6;
   d.setFont("helvetica", "normal"); d.setFontSize(10); d.text("No. " + ak.nomor, W / 2, y, { align: "center" }); y += 10;
-  [["Penyedia", `${setting("nama_perusahaan", "MFlash")} — Cabang ${cabangNama(ak.cabang_id)}`], ["Pelanggan", pl.nama], ["Diwakili", `${ak.ttd_nama_penanda}${pl.jabatan_pic ? ", " + pl.jabatan_pic : ""}`], ["Alamat", pl.alamat || "-"], ["NPWP", pl.npwp || "-"]]
+  [["Penyedia", `${setting("nama_perusahaan", "MFlash")} — Cabang ${cabangNama(ak.cabang_id)}`], ["Pelanggan", pl.nama], ["Diwakili", `${ak.ttd_nama_penanda}${pl.jabatan_pic ? ", " + pl.jabatan_pic : ""}`], ["Alamat", pl.alamat || "-"], ["NPWP", pl.npwp || "-"], ["Paket", `${paketById(ak.paket_id)?.nama || "-"} — ${ak.jumlah_unit} unit — ${rp(ak.harga_bulanan)} / bulan`]]
     .forEach(([k, v]) => { d.setFont("helvetica", "normal"); d.text(k, M, y); d.setFont("helvetica", "bold"); const l = d.splitTextToSize(v, CW - 35); d.text(l, M + 35, y); y += 5 * l.length; });
   y += 3;
   pasal.forEach(([j, isi]) => { y += 2; need(12); para(j, 10.5, "bold"); isi.forEach((x, i) => para((isi.length > 1 ? `${i + 1}. ` : "") + x, 10, "normal", isi.length > 1 ? 3 : 0)); });
   y += 3; need(12); para("Lampiran Unit", 10.5, "bold");
+  if (!units.length) para(`Rincian ${ak.jumlah_unit} unit menyusul dan menjadi bagian tidak terpisahkan dari perjanjian ini.`, 9.5, "normal", 3);
   units.forEach((u, i) => para(`${i + 1}. ${[u.merk, u.tipe].filter(Boolean).join(" ") || "Unit"} — No. seri: ${u.no_seri || "-"} — Lokasi: ${u.lokasi || "-"}`, 9.5, "normal", 3));
   y += 8; need(55);
   const col = (x, judul, img, nama, waktu) => {
@@ -653,32 +710,58 @@ VIEWS.pengaturan = async () => {
     $$(".tabs button").forEach((b) => (b.onclick = () => { tab = b.dataset.t; draw(); }));
     const body = $("#tabBody");
     if (tab === "paket") {
-      const p = S.paket || { harga_bulanan: "", kunjungan_per_bulan: 1, durasi_min_bulan: 12, nama: "Paket Maintenance Standar" };
-      body.innerHTML = `<div class="card"><h3>Paket standar</h3><form class="form" id="f">
-        <label class="full">Nama paket<input name="nama" value="${esc(p.nama)}" required></label>
-        <label>Harga per unit / bulan (Rp)<input type="number" name="harga_bulanan" value="${p.harga_bulanan}" min="0" step="1000" required></label>
-        <label>Kunjungan per bulan<input type="number" name="kunjungan_per_bulan" value="${p.kunjungan_per_bulan}" min="1" max="8" required></label>
+      const L = S.pakets;
+      body.innerHTML = `<div class="card"><div class="card-head"><h3>Paket corporate</h3><button class="btn primary sm" id="pkBaru">+ Paket</button></div>
+        <p class="muted" style="margin-top:-4px">Paket dipilih otomatis dari jumlah unit saat membuat akad. Harga per unit per bulan. Perubahan hanya berlaku untuk akad baru.</p>
+        <div class="tbl-wrap"><table><thead><tr><th>Paket</th><th>Jumlah unit</th><th class="num">Harga / unit / bln</th><th>Benefit</th><th>Status</th><th></th></tr></thead><tbody>
+        ${L.map((p, i) => `<tr><td>${paketBadge(p)}</td><td>${p.kode ? esc(rentangUnit(p)) : "<span class='muted'>paket lama</span>"}</td><td class="num">${rp(p.harga_bulanan)}</td><td><small style="display:block;line-height:1.5">${ketPaket(p).map(esc).join("<br>") || "-"}</small></td><td>${p.aktif ? stBadge("aktif") : stBadge("berakhir")}</td><td class="act"><button class="btn sm" data-pk="${i}">Ubah</button></td></tr>`).join("")}
+        </tbody></table></div></div>`;
+      const form = (p = { aktif: true, kunjungan_per_bulan: 1, durasi_min_bulan: 12, respon_jam: 72, diskon_jasa: 0, diskon_sparepart: 0, bonus_ac_unit: 0, diskon_sewa: 0, keuntungan: [], urutan: L.length + 1 }) => modal(p.id ? "Ubah paket " + p.nama : "Paket baru", `<form class="form" id="fp">
+        <label>Nama paket<input name="nama" value="${esc(p.nama)}" required></label>
+        <label>Kode (huruf kecil, tanpa spasi)<input name="kode" value="${esc(p.kode)}" pattern="[a-z0-9_-]+" placeholder="mis. gold"></label>
+        <label>Unit minimal<input type="number" name="unit_min" value="${p.unit_min ?? ""}" min="1"></label>
+        <label>Unit maksimal (kosongkan = tanpa batas)<input type="number" name="unit_max" value="${p.unit_max ?? ""}" min="1"></label>
+        <label>Harga per unit / bulan (Rp)<input type="number" name="harga_bulanan" value="${p.harga_bulanan ?? ""}" min="0" step="1000" required></label>
+        <label>Kunjungan General Check Up per bulan<input type="number" name="kunjungan_per_bulan" value="${p.kunjungan_per_bulan}" min="1" max="8" required></label>
         <label>Durasi minimal kontrak (bulan)<input type="number" name="durasi_min_bulan" value="${p.durasi_min_bulan}" min="1" required></label>
-        <div class="form-actions"><button class="btn primary">Simpan paket</button></div></form>
-        <p class="muted">Harga di sini jadi harga default saat membuat akad baru. Harga di akad yang sudah berjalan tidak berubah.</p></div>`;
-      $("#f").onsubmit = async (e) => {
-        e.preventDefault(); const v = fd(e.target); ["harga_bulanan", "kunjungan_per_bulan", "durasi_min_bulan"].forEach((k) => (v[k] = +v[k]));
-        cek(S.paket ? await sb.from("paket").update(v).eq("id", S.paket.id) : await sb.from("paket").insert(v));
-        await muatMaster(); toast("Paket tersimpan"); draw();
-      };
+        <label>Respon kerusakan maksimal (jam)<input type="number" name="respon_jam" value="${p.respon_jam}" min="1" step="1"></label>
+        <label>Diskon jasa servis (%) — 100 = gratis<input type="number" name="diskon_jasa" value="${p.diskon_jasa}" min="0" max="100"></label>
+        <label>Diskon sparepart (%)<input type="number" name="diskon_sparepart" value="${p.diskon_sparepart}" min="0" max="100"></label>
+        <label>Bonus servis AC + freon (unit / tahun)<input type="number" name="bonus_ac_unit" value="${p.bonus_ac_unit}" min="0"></label>
+        <label>Diskon sewa laptop (%)<input type="number" name="diskon_sewa" value="${p.diskon_sewa}" min="0" max="100"></label>
+        <label class="full">Keuntungan lain (satu per baris)<textarea name="keuntungan" rows="4">${esc((p.keuntungan || []).join("\n"))}</textarea></label>
+        <label>Urutan tampil<input type="number" name="urutan" value="${p.urutan}" min="0"></label>
+        <label class="chk"><input type="checkbox" name="aktif" ${p.aktif ? "checked" : ""}> Aktif (dipakai untuk akad baru)</label>
+        <div class="form-actions"><button type="button" class="btn" onclick="tutupModal()">Batal</button><button class="btn primary">Simpan paket</button></div></form>`, (el) => {
+        $("#fp", el).onsubmit = async (e) => {
+          e.preventDefault(); const v = fd(e.target);
+          ["harga_bulanan", "kunjungan_per_bulan", "durasi_min_bulan", "respon_jam", "diskon_jasa", "diskon_sparepart", "bonus_ac_unit", "diskon_sewa", "urutan"].forEach((k) => (v[k] = +v[k] || 0));
+          v.unit_min = v.unit_min ? +v.unit_min : null; v.unit_max = v.unit_max ? +v.unit_max : null; v.kode = v.kode ? v.kode.trim() : null;
+          if (v.aktif && (!v.kode || !v.unit_min)) return toast("Paket aktif wajib punya kode dan unit minimal", true);
+          v.keuntungan = (v.keuntungan || "").split("\n").map((x) => x.trim()).filter(Boolean); v.aktif = !!v.aktif;
+          cek(p.id ? await sb.from("paket").update(v).eq("id", p.id) : await sb.from("paket").insert(v));
+          tutupModal(); await muatMaster(); toast("Paket tersimpan"); draw();
+        };
+      });
+      $("#pkBaru").onclick = () => form();
+      $$("[data-pk]").forEach((x) => (x.onclick = () => form(L[+x.dataset.pk])));
     }
     if (tab === "benefit") {
       const F = { bulanan: "Tiap bulan", triwulan: "Tiap 3 bulan", semester: "Tiap 6 bulan", tahunan: "Tiap tahun", sekali: "Sekali di awal" };
       body.innerHTML = `<div class="card"><div class="card-head"><h3>Benefit yang wajib dipenuhi</h3><button class="btn primary sm" id="baru">+ Benefit</button></div>
-        <div class="tbl-wrap">${S.benefit.length ? `<table><thead><tr><th>Benefit</th><th>Frekuensi</th><th>Status</th><th></th></tr></thead><tbody>${S.benefit.map((b, i) => `<tr><td><b>${esc(b.nama)}</b><small>${esc(b.deskripsi || "")}</small></td><td>${F[b.frekuensi]}</td><td>${b.aktif ? stBadge("aktif") : stBadge("berakhir")}</td><td class="act"><button class="btn sm" data-i="${i}">Ubah</button></td></tr>`).join("")}</tbody></table>` : `<div class="empty">Belum ada benefit. Contoh: cek kelistrikan, ganti filter, unit pengganti saat servis, prioritas respon 24 jam.</div>`}</div></div>`;
+        <div class="tbl-wrap">${S.benefit.length ? `<table><thead><tr><th>Benefit</th><th>Frekuensi</th><th>Berlaku untuk</th><th>Status</th><th></th></tr></thead><tbody>${S.benefit.map((b, i) => `<tr><td><b>${esc(b.nama)}</b><small>${esc(b.deskripsi || "")}</small></td><td>${F[b.frekuensi]}</td><td>${b.paket_kode && b.paket_kode.length ? b.paket_kode.map((k) => paketBadge(S.pakets.find((p) => p.kode === k) || { kode: k, nama: k })).join(" ") : "Semua paket"}</td><td>${b.aktif ? stBadge("aktif") : stBadge("berakhir")}</td><td class="act"><button class="btn sm" data-i="${i}">Ubah</button></td></tr>`).join("")}</tbody></table>` : `<div class="empty">Belum ada benefit. Contoh: cek kelistrikan, ganti filter, unit pengganti saat servis, prioritas respon 24 jam.</div>`}</div></div>`;
       const form = (b = { aktif: true, frekuensi: "bulanan" }) => modal(b.id ? "Ubah benefit" : "Benefit baru", `<form class="form" id="fb">
         <label class="full">Nama benefit<input name="nama" value="${esc(b.nama)}" required></label>
         <label class="full">Deskripsi<textarea name="deskripsi" rows="2">${esc(b.deskripsi)}</textarea></label>
         <label>Frekuensi<select name="frekuensi">${Object.entries(F).map(([k, l]) => `<option value="${k}" ${k === b.frekuensi ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+        <div class="full"><b style="font-size:13px">Berlaku untuk paket</b> <small class="muted">(tidak dicentang semua = semua paket)</small><div class="row" style="flex-wrap:wrap;gap:12px;margin-top:6px">${paketTier().map((p) => `<label class="chk"><input type="checkbox" name="pk_${esc(p.kode)}" ${b.paket_kode?.includes(p.kode) ? "checked" : ""}> ${esc(p.nama)}</label>`).join("")}</div></div>
         <label class="chk"><input type="checkbox" name="aktif" ${b.aktif ? "checked" : ""}> Aktif</label>
         <div class="form-actions"><button type="button" class="btn" onclick="tutupModal()">Batal</button><button class="btn primary">Simpan</button></div></form>`, (el) => {
         $("#fb", el).onsubmit = async (e) => {
           e.preventDefault(); const v = fd(e.target); v.aktif = !!v.aktif;
+          const pk = paketTier().filter((p) => v["pk_" + p.kode]).map((p) => p.kode);
+          Object.keys(v).filter((k) => k.startsWith("pk_")).forEach((k) => delete v[k]);
+          v.paket_kode = pk.length && pk.length < paketTier().length ? pk : null;
           cek(b.id ? await sb.from("benefit").update(v).eq("id", b.id) : await sb.from("benefit").insert(v));
           tutupModal(); await muatMaster(); toast("Benefit tersimpan"); draw();
         };

@@ -67,3 +67,8 @@ Aplikasi web terpisah dari dashboard sewa, dengan cara deploy yang sama: GitHub 
 ## Catatan
 - Isi pasal akad adalah template umum. Minta tim legal meninjaunya, lalu teks bisa diubah di fungsi `pasalAkad` pada `web/app.js`.
 - Tanda tangan elektronik di layar tercatat dengan waktu dan nama penanda tangan. Untuk kontrak bernilai besar, pertimbangkan penyedia tanda tangan tersertifikasi (Privy, VIDA, dan sejenisnya).
+
+## Update: paket corporate bertingkat (Basic · Silver · Gold · Star)
+- Database: `supabase/07_paket_corporate.sql` (sudah dijalankan di project `mflash-maintenance`).
+- Paket dipilih otomatis dari jumlah unit saat membuat akad: Basic 5–9 (Rp60rb), Silver 10–24 (Rp50rb), Gold 25–49 (Rp45rb), Star 50+ (Rp40rb) per unit per bulan.
+- Harga, rentang unit, dan benefit tiap paket bisa diubah di Pengaturan → Paket. Benefit wajib bisa dibatasi per paket.
