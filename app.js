@@ -111,7 +111,7 @@ async function kirimWA(jenis, r) {
 /* ---------- navigasi ---------- */
 const ROUTES = [
   ["dashboard", "Dashboard"], ["pengingat", "Pengingat"], ["akad", "Akad"], ["tagihan", "Tagihan"],
-  ["kunjungan", "Kunjungan"], ["benefit", "Benefit"], ["pelanggan", "Pelanggan"], ["pengaturan", "Pengaturan", true],
+  ["kunjungan", "Kunjungan"], ["benefit", "Benefit"], ["pelanggan", "Pelanggan"], ["care", "MFlash CARE"], ["pengaturan", "Pengaturan", true],
 ];
 function renderNav(active, count) {
   $("#nav").innerHTML = ROUTES.filter((r) => !r[2] || isAdmin())
@@ -703,6 +703,68 @@ VIEWS.benefit = async () => {
 };
 
 /* ---------- PENGATURAN (Super Admin) ---------- */
+/* ---------- MFlash CARE (tarikan otomatis dari Data Hub MFlash, setiap hari 03.15 WIB) ---------- */
+VIEWS.care = async () => {
+  const st = { dari: bulanIni(), sampai: today(), cari: "" };
+  const HUB = '<span class="badge b-mute" title="Kolom ini belum dikirim Data Hub">menunggu hub</span>';
+  const isi = (v, f) => (v === null || v === undefined || v === "" ? HUB : f ? f(v) : esc(v));
+  const kondisi = (r) => r.kondisi_unit || (/\bSECOND\b/i.test(r.nama_produk || "") ? "SECOND" : r.nama_produk ? "BARU" : null);
+  async function draw() {
+    let x = q("mflash_care").gte("tgl", st.dari).lte("tgl", st.sampai).order("tgl", { ascending: false }).order("no_faktur");
+    const rows = cek(await x);
+    const k = st.cari.trim().toUpperCase();
+    const list = k ? rows.filter((r) => [r.no_faktur, r.cabang, r.nama_pelanggan, r.nama_produk, r.sn_imei, r.sales].some((v) => String(v || "").toUpperCase().includes(k))) : rows;
+    const sum = (f) => list.reduce((a, r) => a + Number(r[f] || 0), 0);
+    const log = isAdmin() ? (await sb.from("log_tarik_hub").select("*").order("waktu", { ascending: false }).limit(1)).data?.[0] : null;
+    $("#view").innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Faktur MFlash CARE</div><div class="val">${list.length}</div><div class="sub">${tgl(st.dari)} – ${tgl(st.sampai)}</div></div>
+      <div class="kpi"><div class="lbl">Total Jasa QC</div><div class="val">${list.some((r) => r.harga_jasa_qc != null) ? rpJt(sum("harga_jasa_qc")) : "–"}</div><div class="sub">porsi Dana MFlash CARE</div></div>
+      <div class="kpi"><div class="lbl">Total nilai faktur</div><div class="val">${rpJt(sum("total_faktur"))}</div><div class="sub">unit + Jasa QC + bundling</div></div>
+    </div>
+    <div class="toolbar">
+      <label>Dari <input type="date" id="cDari" value="${st.dari}"></label>
+      <label>Sampai <input type="date" id="cSampai" value="${st.sampai}"></label>
+      <input type="search" id="cCari" placeholder="Cari faktur, pelanggan, produk, IMEI…" value="${esc(st.cari)}">
+      <span class="spacer"></span>
+      <button class="btn" id="cCsv">Unduh CSV</button>
+      ${isAdmin() ? `<button class="btn primary" id="cTarik">Tarik sekarang</button>` : ""}
+    </div>
+    <p class="muted" style="margin:-4px 0 10px">Data ditarik otomatis dari Data Hub MFlash setiap hari pukul 03.15 WIB (3 hari terakhir, faktur yang dikoreksi ikut diperbarui).
+      Sementara ini hub baru mengirim ringkasan per faktur, sehingga yang ditampilkan adalah faktur penjualan HP/laptop yang memuat baris jasa (Jasa QC).
+      ${log ? `<br>Tarikan terakhir: ${new Date(log.waktu).toLocaleString("id-ID")} · ${log.ok ? "berhasil" : "gagal"} · ${log.jml_simpan ?? 0} faktur CARE dari ${log.jml_hub ?? 0} faktur${log.ok ? "" : " · " + esc(log.pesan)}` : ""}</p>
+    <div class="tbl-wrap">${list.length ? `<table><thead><tr>
+      <th>Cabang</th><th>No. faktur</th><th>Tanggal</th><th>Nama pelanggan</th><th>Kategori penjualan</th><th>Kondisi unit</th><th>SN / IMEI</th><th>Nama produk</th><th class="num">Harga produk</th><th class="num">Harga Jasa QC</th><th class="num">Total faktur</th>
+    </tr></thead><tbody>${list.map((r) => `<tr>
+      <td>${esc(r.cabang)}</td><td><b>${esc(r.no_faktur)}</b></td><td>${tgl(r.tgl)}</td><td>${isi(r.nama_pelanggan)}</td><td>${esc(r.kategori)}<small>${esc((r.isi || []).join(", "))}</small></td>
+      <td>${isi(kondisi(r))}</td><td>${isi(r.sn_imei)}</td><td>${isi(r.nama_produk)}</td>
+      <td class="num">${isi(r.harga_produk, rp)}</td><td class="num">${isi(r.harga_jasa_qc, rp)}</td><td class="num">${rp(r.total_faktur)}</td></tr>`).join("")}
+    </tbody></table>` : `<div class="empty">Belum ada faktur MFlash CARE pada rentang tanggal ini.</div>`}</div>`;
+    $("#cDari").onchange = (e) => { st.dari = e.target.value; draw(); };
+    $("#cSampai").onchange = (e) => { st.sampai = e.target.value; draw(); };
+    $("#cCari").onchange = (e) => { st.cari = e.target.value; draw(); };
+    $("#cCsv").onclick = () => {
+      const H = ["CABANG", "NO FAKTUR", "TANGGAL", "NAMA PELANGGAN", "KATEGORI PENJUALAN", "KONDISI UNIT", "SN/IMEI", "NAMA PRODUK", "HARGA PRODUK", "HARGA JASA QC", "TOTAL FAKTUR"];
+      const L = list.map((r) => [r.cabang, r.no_faktur, r.tgl, r.nama_pelanggan, r.kategori, kondisi(r), r.sn_imei, r.nama_produk, r.harga_produk, r.harga_jasa_qc, r.total_faktur]);
+      const csv = [H, ...L].map((a) => a.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv" }));
+      a.download = `MFlash_CARE_${st.dari}_sd_${st.sampai}.csv`; a.click();
+    };
+    if ($("#cTarik")) $("#cTarik").onclick = async (e) => {
+      e.target.disabled = true; e.target.textContent = "Menarik…";
+      try {
+        const { data: { session } } = await sb.auth.getSession();
+        const res = await fetch(`${CONFIG.SUPABASE_URL}/functions/v1/tarik-mflash-care?dari=${st.dari}&sampai=${st.sampai}&paksa=1`, { method: "POST", headers: { Authorization: "Bearer " + session.access_token, apikey: CONFIG.SUPABASE_ANON_KEY } });
+        const d = await res.json();
+        if (!d.ok) throw new Error(d.pesan || "gagal");
+        toast(`${d.jml_care} faktur MFlash CARE diperbarui (dari ${d.jml_hub} faktur hub)`);
+      } catch (err) { toast("Tarik gagal: " + err.message, true); }
+      draw();
+    };
+  }
+  await draw();
+};
+
 VIEWS.pengaturan = async () => {
   let tab = "paket";
   const draw = async () => {
