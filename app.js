@@ -729,12 +729,19 @@ VIEWS.care = async () => {
     const k = st.cari.trim().toUpperCase();
     const list = k ? rows.filter((r) => [r.no_faktur, r.cabang, r.nama_pelanggan, r.nama_produk, r.sn_imei].some((v) => String(v || "").toUpperCase().includes(k))) : rows;
     const sum = (f) => list.reduce((a, r) => a + Number(r[f] || 0), 0);
+    const perSkema = (sk) => { const x = list.filter((r) => (r.skema || "PENJUALAN") === sk); return { n: x.length, qc: x.reduce((a, r) => a + Number(r.harga_jasa_qc || 0), 0) }; };
+    const qcJual = perSkema("PENJUALAN"), qcZ = perSkema("Z SERIES"), qcSvc = perSkema("CARE SERVICE");
     const log = isAdmin() ? (await sb.from("log_tarik_hub").select("*").order("waktu", { ascending: false }).limit(1)).data?.[0] : null;
     $("#view").innerHTML = `
     <div class="kpis">
       <div class="kpi"><div class="lbl">Faktur MFlash CARE</div><div class="val">${list.length}</div><div class="sub">${tgl(st.dari)} – ${tgl(st.sampai)}</div></div>
       <div class="kpi"><div class="lbl">Total Jasa QC</div><div class="val">${rpJt(sum("harga_jasa_qc"))}</div><div class="sub">porsi Dana MFlash CARE</div></div>
       <div class="kpi"><div class="lbl">Total nilai faktur</div><div class="val">${rpJt(sum("total_faktur"))}</div><div class="sub">unit + Jasa QC + bundling</div></div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Jasa QC Penjualan</div><div class="val">${rpJt(qcJual.qc)}</div><div class="sub">${qcJual.n} faktur penjualan unit</div></div>
+      <div class="kpi"><div class="lbl">Jasa QC Service Z Series</div><div class="val">${rpJt(qcZ.qc)}</div><div class="sub">${qcZ.n} faktur servis Z Fold / Z Flip</div></div>
+      <div class="kpi"><div class="lbl">Jasa QC Service Non Z Series</div><div class="val">${rpJt(qcSvc.qc)}</div><div class="sub">${qcSvc.n} faktur CARE Service HP &amp; laptop</div></div>
     </div>
     <div class="toolbar">
       <label>Dari <input type="date" id="cDari" value="${st.dari}"></label>
