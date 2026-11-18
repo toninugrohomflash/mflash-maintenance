@@ -730,7 +730,7 @@ async function detailCare(r) {
         <small>Sah bila faktur bernomor MC-…${esc(r.no_faktur)}, uang masuk melalui MFlash CARE, dan memuat produk benefit (nama produk berisi HYDROGEL / MOUSE / KABEL).</small></div>`;
   const mcGrup = {};
   (mc || []).forEach((m) => { (mcGrup[m.cabang + "|" + m.no_faktur] ||= []).push(m); });
-  const riw = Object.keys(mcGrup).length ? Object.values(mcGrup).map((g) => `<div style="margin-bottom:12px"><b>${esc(g[0].no_faktur)}</b> · ${tgl(g[0].tgl)} · ${esc(g[0].cabang)} · uang masuk: ${/mflash\s*care/i.test(g[0].uang_masuk || "") && /^MC[\s.\-]/i.test(g[0].no_faktur || "") ? esc(g[0].uang_masuk) : `<span style="color:#C62828;font-weight:700">${g[0].uang_masuk ? esc(g[0].uang_masuk) : "(kosong)"} – tidak dihitung, kemungkinan salah input</span>`}
+  const riw = Object.keys(mcGrup).length ? Object.values(mcGrup).map((g) => `<div style="margin-bottom:12px"><b>${esc(g[0].no_faktur)}</b> · ${tgl(g[0].tgl)} · ${esc(g[0].cabang)} · uang masuk: ${(!g[0].uang_masuk || /mflash\s*care/i.test(g[0].uang_masuk)) && /^MC[\s.\-]/i.test(g[0].no_faktur || "") ? (g[0].uang_masuk ? esc(g[0].uang_masuk) : "(tidak terkirim dari Data Hub – dianggap MFlash CARE sementara)") : `<span style="color:#C62828;font-weight:700">${g[0].uang_masuk ? esc(g[0].uang_masuk) : "(kosong)"} – tidak dihitung, kemungkinan salah input</span>`}
       <table><thead><tr><th>Produk</th><th>Jenis</th><th class="num">Qty</th><th class="num">Nilai</th></tr></thead><tbody>${g.map((m) => `<tr><td>${esc(m.nama)}</td><td>${esc(m.jenis === "KLAIM" ? "Klaim" : BENEFIT_LBL[m.jenis] || m.jenis)}</td><td class="num">${v(m.qty)}</td><td class="num">${v(m.nilai, rp)}</td></tr>`).join("")}</tbody></table></div>`).join("")
     : '<p class="muted">Belum ada faktur MC-MF (klaim / benefit) untuk faktur ini.</p>';
   const tabs = {
@@ -781,7 +781,8 @@ VIEWS.care = async () => {
     ]);
     const milikSaya = new Set((semuaQC || []).map((r) => r.no_faktur));
     // dihitung hanya faktur bernomor MC-MF DAN uang masuk melalui MFlash CARE; selain itu kemungkinan salah input
-    const sahMC = (m) => /^MC[\s.\-]/i.test(m.no_faktur || "") && /mflash\s*care/i.test(m.uang_masuk || "");
+    // SEMENTARA: uang masuk kosong di Data Hub dianggap sah (hub belum mengirim pilihan MFLASH CARE)
+    const sahMC = (m) => /^MC[\s.\-]/i.test(m.no_faktur || "") && (!m.uang_masuk || /mflash\s*care/i.test(m.uang_masuk));
     const mcSemua = (semuaMC || []).filter((m) => isAdmin() && !S.fc ? true : milikSaya.has(m.ref_faktur));
     const mcSalah = [...new Set(mcSemua.filter((m) => !sahMC(m)).map((m) => m.no_faktur))];
     const mcList = mcSemua.filter(sahMC).filter((m) => isAdmin() && !S.fc ? true : milikSaya.has(m.ref_faktur));
