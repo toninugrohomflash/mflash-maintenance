@@ -159,3 +159,4 @@ td small{display:block;color:var(--muted)}
 .tbl-klik tbody tr:hover td{background:var(--surface-2)}
 @media (max-width:640px){.kvt th{width:120px}}
 .b-brand{background:#FFF1E2;color:#E9740F}
+@media (max-width:640px){.saldo-care{grid-template-columns:1fr 1fr!important}}
