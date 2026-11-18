@@ -708,7 +708,7 @@ VIEWS.care = async () => {
   const st = { dari: bulanIni(), sampai: today(), cari: "" };
   const HUB = '<span class="badge b-mute" title="Kolom ini belum dikirim Data Hub">menunggu hub</span>';
   const isi = (v, f) => (v === null || v === undefined || v === "" ? HUB : f ? f(v) : esc(v));
-  const kondisi = (r) => r.kondisi_unit || (/\bSECOND\b/i.test(r.nama_produk || "") ? "SECOND" : r.nama_produk ? "BARU" : null);
+  const kondisi = (r) => r.kondisi_unit || (/\bSECOND\b/i.test(r.nama_produk || "") ? "SECOND" : null);
   async function draw() {
     let x = q("mflash_care").gte("tgl", st.dari).lte("tgl", st.sampai).order("tgl", { ascending: false }).order("no_faktur");
     const rows = cek(await x);
@@ -731,7 +731,7 @@ VIEWS.care = async () => {
       ${isAdmin() ? `<button class="btn primary" id="cTarik">Tarik sekarang</button>` : ""}
     </div>
     <p class="muted" style="margin:-4px 0 10px">Data ditarik otomatis dari Data Hub MFlash setiap hari pukul 03.15 WIB (3 hari terakhir, faktur yang dikoreksi ikut diperbarui).
-      Sementara ini hub baru mengirim ringkasan per faktur, sehingga yang ditampilkan adalah faktur penjualan HP/laptop yang memuat baris jasa (Jasa QC).
+      Yang ditampilkan: faktur berkategori promo MFLASH CARE atau yang memuat baris Jasa QC (penjualan, CARE Service, Z Series). Faktur klaim / benefit (MC-MF) tidak termasuk.
       ${log ? `<br>Tarikan terakhir: ${new Date(log.waktu).toLocaleString("id-ID")} · ${log.ok ? "berhasil" : "gagal"} · ${log.jml_simpan ?? 0} faktur CARE dari ${log.jml_hub ?? 0} faktur${log.ok ? "" : " · " + esc(log.pesan)}` : ""}</p>
     <div class="tbl-wrap">${list.length ? `<table><thead><tr>
       <th>Cabang</th><th>No. faktur</th><th>Tanggal</th><th>Nama pelanggan</th><th>Kategori penjualan</th><th>Kondisi unit</th><th>SN / IMEI</th><th>Nama produk</th><th class="num">Harga produk</th><th class="num">Harga Jasa QC</th><th class="num">Total faktur</th>
