@@ -704,6 +704,9 @@ VIEWS.benefit = async () => {
 
 /* ---------- PENGATURAN (Super Admin) ---------- */
 /* ---------- MFlash CARE (tarikan harian rincian faktur Data Hub, 03.15 WIB) ---------- */
+const skemaBadge = (s) => s === "Z SERIES" ? '<span class="badge" style="background:#13285C;color:#fff">Service Z Series</span>'
+  : s === "CARE SERVICE" ? '<span class="badge" style="background:#F7891A;color:#fff">CARE Service</span>'
+  : '<span class="badge" style="background:#E8EEF8;color:#13285C">Penjualan</span>';
 const BENEFIT_LBL = { "HYDROGEL": "Pergantian hydrogel", "MOUSE WIRELESS": "Mouse wireless", "KABEL DATA TYPE C": "Kabel data Type C" };
 async function detailCare(r) {
   const [{ data: rinci }, { data: mc }] = await Promise.all([
@@ -730,7 +733,7 @@ async function detailCare(r) {
       <table><thead><tr><th>Produk</th><th>Jenis</th><th class="num">Qty</th><th class="num">Nilai</th></tr></thead><tbody>${g.map((m) => `<tr><td>${esc(m.nama)}</td><td>${esc(m.jenis === "KLAIM" ? "Klaim" : BENEFIT_LBL[m.jenis] || m.jenis)}</td><td class="num">${v(m.qty)}</td><td class="num">${v(m.nilai, rp)}</td></tr>`).join("")}</tbody></table></div>`).join("")
     : '<p class="muted">Belum ada faktur MC-MF (klaim / benefit) untuk faktur ini.</p>';
   const tabs = {
-    info: kv([["Cabang", esc(r.cabang)], ["No. faktur", `<b>${esc(r.no_faktur)}</b>`], ["Tanggal faktur", tgl(r.tgl)], ["Nama pelanggan", v(r.nama_pelanggan)], ["Kategori penjualan", esc(r.kategori)], ["Skema", v(r.skema)], ["Perangkat", v(r.perangkat)], ["Kondisi unit", v(r.kondisi_unit)], ["Nama produk", v(r.nama_produk)], ["SN / IMEI", sn], ["Harga produk", v(r.harga_produk, rp)], ["Harga Jasa QC", v(r.harga_jasa_qc, rp)], ["Total faktur", v(r.total_faktur, rp)]]),
+    info: kv([["Cabang", esc(r.cabang)], ["No. faktur", `<b>${esc(r.no_faktur)}</b>`], ["Tanggal faktur", tgl(r.tgl)], ["Nama pelanggan", v(r.nama_pelanggan)], ["Kategori penjualan", esc(r.kategori)], ["Skema", skemaBadge(r.skema)], ["Perangkat", v(r.perangkat)], ["Kondisi unit", v(r.kondisi_unit)], ["Nama produk", v(r.nama_produk)], ["SN / IMEI", sn], ["Harga produk", v(r.harga_produk, rp)], ["Harga Jasa QC", v(r.harga_jasa_qc, rp)], ["Total faktur", v(r.total_faktur, rp)]]),
     rinci: (rinci || []).length ? `<table><thead><tr><th>#</th><th>Nama barang</th><th>SN / IMEI</th><th class="num">Qty</th><th class="num">@Harga</th><th class="num">Total</th></tr></thead><tbody>${rinci.map((b) => `<tr><td>${b.baris}</td><td>${esc(b.nama)}${/^JASA QC/i.test(b.nama || "") ? ' <span class="badge b-brand">CARE</span>' : ""}</td><td>${v(b.sn)}</td><td class="num">${v(b.qty)}</td><td class="num">${v(b.harga, rp)}</td><td class="num">${v(b.nilai, rp)}</td></tr>`).join("")}</tbody></table>` : '<p class="muted">Rincian barang belum tersedia, tekan "Tarik sekarang".</p>',
     proteksi: kv([["Mulai berlaku", tgl(r.tgl)], ["Proteksi berakhir", `${v(r.garansi_sd, tgl)} ${status(r.garansi_sd)}`], ["Jasa servis gratis s/d", `${v(r.jasa_sd, tgl)} ${status(r.jasa_sd)}`], ["Kuota klaim", kuota], ["Lokasi klaim", "Seluruh cabang MFlash"]]),
     benefit: ben,
@@ -795,10 +798,10 @@ VIEWS.care = async () => {
       Garansi dihitung dari tanggal faktur sesuai juklak: penjualan laptop 1 tahun, penjualan HP 1 tahun (jasa servis s/d 5 tahun), CARE Service laptop 1 tahun / HP 5 tahun, Z Series 1 tahun.
       ${log ? `<br>Tarikan terakhir: ${new Date(log.waktu).toLocaleString("id-ID")} · ${log.ok ? "berhasil" : "gagal"} · ${log.jml_simpan ?? 0} faktur CARE dari ${log.jml_hub ?? 0} faktur${log.ok ? "" : " · " + esc(log.pesan)}` : ""}</p>
     <div class="tbl-wrap">${list.length ? `<table class="tbl-klik"><thead><tr>
-      <th>Cabang</th><th>No. faktur</th><th>Tgl faktur</th><th>Nama pelanggan</th><th>Kategori penjualan</th><th class="num">Harga Jasa QC</th>
+      <th>Cabang</th><th>No. faktur</th><th>Tgl faktur</th><th>Nama pelanggan</th><th>Kategori penjualan</th><th>Skema</th><th class="num">Harga Jasa QC</th>
     </tr></thead><tbody>${list.map((r, ix) => `<tr data-ix="${ix}" style="cursor:pointer" title="Klik untuk melihat rincian faktur">
       <td>${esc(r.cabang)}</td><td><b style="color:var(--brand)">${esc(r.no_faktur)}</b></td><td>${tgl(r.tgl)}</td><td>${isi(r.nama_pelanggan)}</td>
-      <td>${esc(r.kategori)}</td><td class="num">${isi(r.harga_jasa_qc, rp)}</td></tr>`).join("")}
+      <td>${esc(r.kategori)}</td><td>${skemaBadge(r.skema)}</td><td class="num">${isi(r.harga_jasa_qc, rp)}</td></tr>`).join("")}
     </tbody></table>` : `<div class="empty">Belum ada faktur MFlash CARE pada rentang tanggal ini.</div>`}</div>`;
     $$(".tbl-klik tbody tr").forEach((tr) => (tr.onclick = () => detailCare(list[+tr.dataset.ix])));
     $("#cDari").onchange = (e) => { st.dari = e.target.value; draw(); };
