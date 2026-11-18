@@ -726,10 +726,11 @@ async function detailCare(r) {
     : `<div style="padding:14px 16px;border-radius:12px;border:1px solid ${r.benefit_diambil ? "#2E7D32" : "#E65100"};background:${r.benefit_diambil ? "#EDF7EE" : "#FFF3E0"}">
         <div style="font-weight:700;font-size:16px">${BENEFIT_LBL[r.benefit_jenis] || esc(r.benefit_jenis)}</div>
         <div style="margin-top:4px">${r.benefit_diambil ? `<span class="badge b-good">Sudah diambil</span> · faktur <b>${esc(r.benefit_faktur)}</b> · ${tgl(r.benefit_tgl)} · ${esc(r.benefit_cabang)}` : `<span class="badge b-warn">Belum diambil</span> · belum ada faktur MC-MF dengan produk ${BENEFIT_LBL[r.benefit_jenis] ? BENEFIT_LBL[r.benefit_jenis].toLowerCase() : ""} untuk nomor faktur ini`}</div>
-        <small>Dibaca dari faktur bernomor MC-…${esc(r.no_faktur)} yang memuat produk benefit (nama produk berisi HYDROGEL / MOUSE / KABEL).</small></div>`;
+        ${r.benefit_catatan ? `<div style="color:#C62828;font-weight:600;margin-top:6px">⚠ ${esc(r.benefit_catatan)}</div>` : ""}
+        <small>Sah bila faktur bernomor MC-…${esc(r.no_faktur)}, uang masuk melalui MFlash CARE, dan memuat produk benefit (nama produk berisi HYDROGEL / MOUSE / KABEL).</small></div>`;
   const mcGrup = {};
   (mc || []).forEach((m) => { (mcGrup[m.cabang + "|" + m.no_faktur] ||= []).push(m); });
-  const riw = Object.keys(mcGrup).length ? Object.values(mcGrup).map((g) => `<div style="margin-bottom:12px"><b>${esc(g[0].no_faktur)}</b> · ${tgl(g[0].tgl)} · ${esc(g[0].cabang)} · uang masuk: ${v(g[0].uang_masuk)}
+  const riw = Object.keys(mcGrup).length ? Object.values(mcGrup).map((g) => `<div style="margin-bottom:12px"><b>${esc(g[0].no_faktur)}</b> · ${tgl(g[0].tgl)} · ${esc(g[0].cabang)} · uang masuk: ${/mflash\s*care/i.test(g[0].uang_masuk || "") && /^MC[\s.\-]/i.test(g[0].no_faktur || "") ? esc(g[0].uang_masuk) : `<span style="color:#C62828;font-weight:700">${g[0].uang_masuk ? esc(g[0].uang_masuk) : "(kosong)"} – tidak dihitung, kemungkinan salah input</span>`}
       <table><thead><tr><th>Produk</th><th>Jenis</th><th class="num">Qty</th><th class="num">Nilai</th></tr></thead><tbody>${g.map((m) => `<tr><td>${esc(m.nama)}</td><td>${esc(m.jenis === "KLAIM" ? "Klaim" : BENEFIT_LBL[m.jenis] || m.jenis)}</td><td class="num">${v(m.qty)}</td><td class="num">${v(m.nilai, rp)}</td></tr>`).join("")}</tbody></table></div>`).join("")
     : '<p class="muted">Belum ada faktur MC-MF (klaim / benefit) untuk faktur ini.</p>';
   const tabs = {
@@ -776,11 +777,14 @@ VIEWS.care = async () => {
     // saldo kumulatif (sejak awal program, tidak terpengaruh filter tanggal)
     const [{ data: semuaQC }, { data: semuaMC }] = await Promise.all([
       q("mflash_care", "no_faktur,harga_jasa_qc"),
-      sb.from("mflash_care_mc").select("ref_faktur,jenis,nilai,uang_masuk"),
+      sb.from("mflash_care_mc").select("no_faktur,ref_faktur,jenis,nilai,uang_masuk"),
     ]);
     const milikSaya = new Set((semuaQC || []).map((r) => r.no_faktur));
-    // mflash_care_mc berisi faktur bernomor MC-MF ATAU faktur dengan uang masuk melalui MFlash CARE (dua-duanya dihitung)
-    const mcList = (semuaMC || []).filter((m) => isAdmin() && !S.fc ? true : milikSaya.has(m.ref_faktur));
+    // dihitung hanya faktur bernomor MC-MF DAN uang masuk melalui MFlash CARE; selain itu kemungkinan salah input
+    const sahMC = (m) => /^MC[\s.\-]/i.test(m.no_faktur || "") && /mflash\s*care/i.test(m.uang_masuk || "");
+    const mcSemua = (semuaMC || []).filter((m) => isAdmin() && !S.fc ? true : milikSaya.has(m.ref_faktur));
+    const mcSalah = [...new Set(mcSemua.filter((m) => !sahMC(m)).map((m) => m.no_faktur))];
+    const mcList = mcSemua.filter(sahMC).filter((m) => isAdmin() && !S.fc ? true : milikSaya.has(m.ref_faktur));
     const danaMasuk = (semuaQC || []).reduce((a, r) => a + Number(r.harga_jasa_qc || 0), 0);
     const klaim = mcList.filter((m) => m.jenis === "KLAIM").reduce((a, m) => a + Number(m.nilai || 0), 0);
     const benefit = mcList.filter((m) => m.jenis !== "KLAIM").reduce((a, m) => a + Number(m.nilai || 0), 0);
@@ -789,10 +793,10 @@ VIEWS.care = async () => {
     $("#view").innerHTML = `
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px"><img src="logo-care.png" alt="MFlash CARE" style="height:72px;border-radius:12px"><div class="muted" style="line-height:1.4">Proteksi penjualan unit second, service HP &amp; laptop, dan service Galaxy Z Series</div></div>
     <div class="card saldo-care" style="background:#13285C;color:#fff;border-radius:16px;padding:18px 22px;margin-bottom:16px;display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;gap:16px;align-items:center">
-      <div><div style="font-size:13px;opacity:.8">Sisa saldo MFlash CARE</div><div style="font-size:30px;font-weight:800;color:${saldo < 0 ? "#FF8A80" : "#FFB15C"}">${rp(saldo)}</div><div style="font-size:12px;opacity:.75">kumulatif sejak awal program${isAdmin() && !S.fc ? "" : " · cabang ini"}</div></div>
+      <div><div style="font-size:13px;opacity:.8">Sisa saldo MFlash CARE</div><div style="font-size:30px;font-weight:800;color:${saldo < 0 ? "#FF8A80" : "#FFB15C"}">${rp(saldo)}</div><div style="font-size:12px;opacity:.75">kumulatif sejak awal program${isAdmin() && !S.fc ? "" : " · cabang ini"}</div>${mcSalah.length ? `<div style="font-size:12px;color:#FF8A80;margin-top:4px" title="${esc(mcSalah.join(", "))}">${mcSalah.length} faktur tidak dihitung (kemungkinan salah input): ${esc(mcSalah.slice(0, 3).join(", "))}${mcSalah.length > 3 ? "…" : ""}</div>` : ""}</div>
       <div><div style="font-size:13px;opacity:.8">Dana masuk (Jasa QC)</div><div style="font-size:20px;font-weight:700">${rp(danaMasuk)}</div></div>
-      <div><div style="font-size:13px;opacity:.8">Klaim (MC-MF / uang masuk MFlash CARE)</div><div style="font-size:20px;font-weight:700">− ${rp(klaim)}</div></div>
-      <div><div style="font-size:13px;opacity:.8">Benefit (MC-MF / uang masuk MFlash CARE)</div><div style="font-size:20px;font-weight:700">− ${rp(benefit)}</div></div>
+      <div><div style="font-size:13px;opacity:.8">Klaim (MC-MF + uang masuk MFlash CARE)</div><div style="font-size:20px;font-weight:700">− ${rp(klaim)}</div></div>
+      <div><div style="font-size:13px;opacity:.8">Benefit (MC-MF + uang masuk MFlash CARE)</div><div style="font-size:20px;font-weight:700">− ${rp(benefit)}</div></div>
     </div>
     <div class="kpis">
       <div class="kpi"><div class="lbl">Faktur MFlash CARE</div><div class="val">${list.length}</div><div class="sub">${tgl(st.dari)} – ${tgl(st.sampai)}</div></div>
