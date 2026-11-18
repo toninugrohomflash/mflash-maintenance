@@ -151,3 +151,11 @@ td small{display:block;color:var(--muted)}
 .paket-cell .val{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
 .paket-cell .val .muted{font-size:13px;font-weight:500}
 .paket-cell .badge{align-self:flex-start}
+/* MFlash CARE – detail faktur */
+.kvt{width:100%;border-collapse:collapse}
+.kvt th{width:190px;text-align:left;font-weight:500;color:var(--ink-2);padding:7px 10px 7px 0;vertical-align:top;border-bottom:1px solid var(--line)}
+.kvt td{padding:7px 0;font-weight:600;border-bottom:1px solid var(--line)}
+.kvt td small{display:block;font-weight:400}
+.tbl-klik tbody tr:hover td{background:var(--surface-2)}
+@media (max-width:640px){.kvt th{width:120px}}
+.b-brand{background:#FFF1E2;color:#E9740F}

@@ -704,6 +704,45 @@ VIEWS.benefit = async () => {
 
 /* ---------- PENGATURAN (Super Admin) ---------- */
 /* ---------- MFlash CARE (tarikan harian rincian faktur Data Hub, 03.15 WIB) ---------- */
+const BENEFIT_LBL = { "HYDROGEL": "Pergantian hydrogel", "MOUSE WIRELESS": "Mouse wireless", "KABEL DATA TYPE C": "Kabel data Type C" };
+async function detailCare(r) {
+  const [{ data: rinci }, { data: mc }] = await Promise.all([
+    sb.from("mflash_care_baris").select("*").eq("cabang", r.cabang).eq("no_faktur", r.no_faktur).order("baris"),
+    sb.from("mflash_care_mc").select("*").eq("ref_faktur", r.no_faktur).order("tgl").order("no_faktur").order("baris"),
+  ]);
+  const v = (x, f) => (x === null || x === undefined || x === "" ? "–" : f ? f(x) : esc(x));
+  const hariIni = today();
+  const sisa = (d) => (d ? Math.round((new Date(d) - new Date(hariIni)) / 86400000) : null);
+  const status = (d) => { const s = sisa(d); if (s === null) return "–"; if (s < 0) return '<span class="badge b-mute">Berakhir</span>'; if (s <= 30) return `<span class="badge b-warn">${s} hari lagi</span>`; return '<span class="badge b-good">Aktif</span>'; };
+  const sn = r.sn_valid === false ? `<span style="color:#C62828;font-weight:700">${r.sn_imei ? esc(r.sn_imei) : "(kosong)"}</span><small style="color:#C62828">${esc(r.sn_catatan || "")}</small>` : v(r.sn_imei);
+  const kv = (rows) => `<table class="kvt">${rows.map(([k, x]) => `<tr><th>${k}</th><td>${x}</td></tr>`).join("")}</table>`;
+  const kuota = r.skema === "Z SERIES" ? "Sparepart & jasa: 1x klaim / 1 tahun"
+    : r.skema === "CARE SERVICE" ? (r.perangkat === "HP" ? "Jasa servis: maks 3x klaim (3 nota) / 5 tahun · sparepart ditanggung selama garansi" : "Jasa servis: maks 1x klaim (1 nota) / 1 tahun · sparepart ditanggung selama garansi")
+    : (r.perangkat === "HP" ? "Jasa servis: maks 5x klaim / 5 tahun · sparepart 1x klaim / 1 tahun" : "Jasa servis: maks 1x klaim / 1 tahun · sparepart 1x klaim / 1 tahun");
+  const ben = !r.benefit_jenis ? '<p class="muted">Skema ini tidak memiliki benefit barang.</p>'
+    : `<div style="padding:14px 16px;border-radius:12px;border:1px solid ${r.benefit_diambil ? "#2E7D32" : "#E65100"};background:${r.benefit_diambil ? "#EDF7EE" : "#FFF3E0"}">
+        <div style="font-weight:700;font-size:16px">${BENEFIT_LBL[r.benefit_jenis] || esc(r.benefit_jenis)}</div>
+        <div style="margin-top:4px">${r.benefit_diambil ? `<span class="badge b-good">Sudah diambil</span> · faktur <b>${esc(r.benefit_faktur)}</b> · ${tgl(r.benefit_tgl)} · ${esc(r.benefit_cabang)}` : `<span class="badge b-warn">Belum diambil</span> · belum ada faktur MC-MF dengan produk ${BENEFIT_LBL[r.benefit_jenis] ? BENEFIT_LBL[r.benefit_jenis].toLowerCase() : ""} untuk nomor faktur ini`}</div>
+        <small>Dibaca dari faktur bernomor MC-…${esc(r.no_faktur)} yang memuat produk benefit (nama produk berisi HYDROGEL / MOUSE / KABEL).</small></div>`;
+  const mcGrup = {};
+  (mc || []).forEach((m) => { (mcGrup[m.cabang + "|" + m.no_faktur] ||= []).push(m); });
+  const riw = Object.keys(mcGrup).length ? Object.values(mcGrup).map((g) => `<div style="margin-bottom:12px"><b>${esc(g[0].no_faktur)}</b> · ${tgl(g[0].tgl)} · ${esc(g[0].cabang)} · uang masuk: ${v(g[0].uang_masuk)}
+      <table><thead><tr><th>Produk</th><th>Jenis</th><th class="num">Qty</th><th class="num">Nilai</th></tr></thead><tbody>${g.map((m) => `<tr><td>${esc(m.nama)}</td><td>${esc(m.jenis === "KLAIM" ? "Klaim" : BENEFIT_LBL[m.jenis] || m.jenis)}</td><td class="num">${v(m.qty)}</td><td class="num">${v(m.nilai, rp)}</td></tr>`).join("")}</tbody></table></div>`).join("")
+    : '<p class="muted">Belum ada faktur MC-MF (klaim / benefit) untuk faktur ini.</p>';
+  const tabs = {
+    info: kv([["Cabang", esc(r.cabang)], ["No. faktur", `<b>${esc(r.no_faktur)}</b>`], ["Tanggal faktur", tgl(r.tgl)], ["Nama pelanggan", v(r.nama_pelanggan)], ["Kategori penjualan", esc(r.kategori)], ["Skema", v(r.skema)], ["Perangkat", v(r.perangkat)], ["Kondisi unit", v(r.kondisi_unit)], ["Nama produk", v(r.nama_produk)], ["SN / IMEI", sn], ["Harga produk", v(r.harga_produk, rp)], ["Harga Jasa QC", v(r.harga_jasa_qc, rp)], ["Total faktur", v(r.total_faktur, rp)]]),
+    rinci: (rinci || []).length ? `<table><thead><tr><th>#</th><th>Nama barang</th><th>SN / IMEI</th><th class="num">Qty</th><th class="num">@Harga</th><th class="num">Total</th></tr></thead><tbody>${rinci.map((b) => `<tr><td>${b.baris}</td><td>${esc(b.nama)}${/^JASA QC/i.test(b.nama || "") ? ' <span class="badge b-brand">CARE</span>' : ""}</td><td>${v(b.sn)}</td><td class="num">${v(b.qty)}</td><td class="num">${v(b.harga, rp)}</td><td class="num">${v(b.nilai, rp)}</td></tr>`).join("")}</tbody></table>` : '<p class="muted">Rincian barang belum tersedia, tekan "Tarik sekarang".</p>',
+    proteksi: kv([["Mulai berlaku", tgl(r.tgl)], ["Proteksi berakhir", `${v(r.garansi_sd, tgl)} ${status(r.garansi_sd)}`], ["Jasa servis gratis s/d", `${v(r.jasa_sd, tgl)} ${status(r.jasa_sd)}`], ["Kuota klaim", kuota], ["Lokasi klaim", "Seluruh cabang MFlash"]]),
+    benefit: ben,
+    mc: riw,
+  };
+  const label = { info: "Info faktur", rinci: "Rincian barang", proteksi: "Masa proteksi", benefit: "Benefit", mc: "Klaim & benefit (MC-MF)" };
+  modal(`Faktur ${r.no_faktur}`, `<div class="tabs" id="dTabs">${Object.keys(label).map((k, i) => `<button data-t="${k}" class="${i ? "" : "on"}">${label[k]}${k === "benefit" && r.benefit_jenis ? (r.benefit_diambil ? " ✓" : " •") : ""}</button>`).join("")}</div><div id="dBody" style="padding-top:14px">${tabs.info}</div>`, (el) => {
+    el.closest(".modal-card").style.maxWidth = "860px";
+    $$("#dTabs button").forEach((b) => (b.onclick = () => { $$("#dTabs button").forEach((x) => x.classList.toggle("on", x === b)); $("#dBody").innerHTML = tabs[b.dataset.t]; }));
+  });
+}
+
 VIEWS.care = async () => {
   const st = { dari: bulanIni(), sampai: today(), cari: "" };
   const isi = (v, f) => (v === null || v === undefined || v === "" ? "–" : f ? f(v) : esc(v));
@@ -752,17 +791,16 @@ VIEWS.care = async () => {
       <button class="btn" id="cCsv">Unduh CSV</button>
       ${isAdmin() ? `<button class="btn primary" id="cTarik">Tarik sekarang</button>` : ""}
     </div>
-    <p class="muted" style="margin:-4px 0 10px">SN/IMEI berwarna <b style="color:#C62828">merah</b> berarti salah / tidak sesuai Juklak 3.1 c (arahkan kursor untuk melihat alasannya). Data ditarik otomatis dari rincian faktur Data Hub MFlash setiap hari pukul 03.15 WIB (3 hari terakhir). Yang ditampilkan hanya faktur yang memuat baris Jasa QC; faktur klaim / benefit (MC-MF) tidak termasuk.
+    <p class="muted" style="margin:-4px 0 10px">Klik baris faktur untuk melihat rincian lengkap, masa proteksi, benefit dan riwayat MC-MF. SN/IMEI berwarna <b style="color:#C62828">merah</b> berarti salah / tidak sesuai Juklak 3.1 c (arahkan kursor untuk melihat alasannya). Data ditarik otomatis dari rincian faktur Data Hub MFlash setiap hari pukul 03.15 WIB (3 hari terakhir). Yang ditampilkan hanya faktur yang memuat baris Jasa QC; faktur klaim / benefit (MC-MF) tidak termasuk.
       Garansi dihitung dari tanggal faktur sesuai juklak: penjualan laptop 1 tahun, penjualan HP 1 tahun (jasa servis s/d 5 tahun), CARE Service laptop 1 tahun / HP 5 tahun, Z Series 1 tahun.
       ${log ? `<br>Tarikan terakhir: ${new Date(log.waktu).toLocaleString("id-ID")} · ${log.ok ? "berhasil" : "gagal"} · ${log.jml_simpan ?? 0} faktur CARE dari ${log.jml_hub ?? 0} faktur${log.ok ? "" : " · " + esc(log.pesan)}` : ""}</p>
-    <div class="tbl-wrap">${list.length ? `<table><thead><tr>
-      <th>Cabang</th><th>No. faktur</th><th>Tanggal</th><th>Nama pelanggan</th><th>Kategori penjualan</th><th>Kondisi unit</th><th>SN / IMEI</th><th>Nama produk</th><th class="num">Harga produk</th><th class="num">Harga Jasa QC</th><th>Garansi berakhir</th>
-    </tr></thead><tbody>${list.map((r) => `<tr>
-      <td>${esc(r.cabang)}</td><td><b>${esc(r.no_faktur)}</b></td><td>${tgl(r.tgl)}</td><td>${isi(r.nama_pelanggan)}</td>
-      <td>${esc(r.kategori)}<small>${esc([r.skema, r.perangkat].filter(Boolean).join(" · "))}</small></td>
-      <td>${isi(r.kondisi_unit)}</td><td>${kolomSN(r)}</td><td>${isi(r.nama_produk)}</td>
-      <td class="num">${isi(r.harga_produk, rp)}</td><td class="num">${isi(r.harga_jasa_qc, rp)}</td><td>${kolomGaransi(r)}</td></tr>`).join("")}
+    <div class="tbl-wrap">${list.length ? `<table class="tbl-klik"><thead><tr>
+      <th>Cabang</th><th>No. faktur</th><th>Tgl faktur</th><th>Nama pelanggan</th><th>Kategori penjualan</th><th class="num">Harga Jasa QC</th>
+    </tr></thead><tbody>${list.map((r, ix) => `<tr data-ix="${ix}" style="cursor:pointer" title="Klik untuk melihat rincian faktur">
+      <td>${esc(r.cabang)}</td><td><b style="color:var(--brand)">${esc(r.no_faktur)}</b></td><td>${tgl(r.tgl)}</td><td>${isi(r.nama_pelanggan)}</td>
+      <td>${esc(r.kategori)}</td><td class="num">${isi(r.harga_jasa_qc, rp)}</td></tr>`).join("")}
     </tbody></table>` : `<div class="empty">Belum ada faktur MFlash CARE pada rentang tanggal ini.</div>`}</div>`;
+    $$(".tbl-klik tbody tr").forEach((tr) => (tr.onclick = () => detailCare(list[+tr.dataset.ix])));
     $("#cDari").onchange = (e) => { st.dari = e.target.value; draw(); };
     $("#cSampai").onchange = (e) => { st.sampai = e.target.value; draw(); };
     $("#cCari").onchange = (e) => { st.cari = e.target.value; draw(); };
