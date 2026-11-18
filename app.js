@@ -776,10 +776,10 @@ VIEWS.care = async () => {
     // saldo kumulatif (sejak awal program, tidak terpengaruh filter tanggal)
     const [{ data: semuaQC }, { data: semuaMC }] = await Promise.all([
       q("mflash_care", "no_faktur,harga_jasa_qc"),
-      sb.from("mflash_care_mc").select("ref_faktur,jenis,nilai"),
+      sb.from("mflash_care_mc").select("ref_faktur,jenis,nilai,uang_masuk"),
     ]);
     const milikSaya = new Set((semuaQC || []).map((r) => r.no_faktur));
-    const mcList = (semuaMC || []).filter((m) => isAdmin() && !S.fc ? true : milikSaya.has(m.ref_faktur));
+    const mcList = (semuaMC || []).filter((m) => /mflash\s*care/i.test(m.uang_masuk || "")).filter((m) => isAdmin() && !S.fc ? true : milikSaya.has(m.ref_faktur));
     const danaMasuk = (semuaQC || []).reduce((a, r) => a + Number(r.harga_jasa_qc || 0), 0);
     const klaim = mcList.filter((m) => m.jenis === "KLAIM").reduce((a, m) => a + Number(m.nilai || 0), 0);
     const benefit = mcList.filter((m) => m.jenis !== "KLAIM").reduce((a, m) => a + Number(m.nilai || 0), 0);
@@ -790,8 +790,8 @@ VIEWS.care = async () => {
     <div class="card saldo-care" style="background:#13285C;color:#fff;border-radius:16px;padding:18px 22px;margin-bottom:16px;display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;gap:16px;align-items:center">
       <div><div style="font-size:13px;opacity:.8">Sisa saldo MFlash CARE</div><div style="font-size:30px;font-weight:800;color:${saldo < 0 ? "#FF8A80" : "#FFB15C"}">${rp(saldo)}</div><div style="font-size:12px;opacity:.75">kumulatif sejak awal program${isAdmin() && !S.fc ? "" : " · cabang ini"}</div></div>
       <div><div style="font-size:13px;opacity:.8">Dana masuk (Jasa QC)</div><div style="font-size:20px;font-weight:700">${rp(danaMasuk)}</div></div>
-      <div><div style="font-size:13px;opacity:.8">Klaim (faktur MC-MF)</div><div style="font-size:20px;font-weight:700">− ${rp(klaim)}</div></div>
-      <div><div style="font-size:13px;opacity:.8">Benefit (faktur MC-MF)</div><div style="font-size:20px;font-weight:700">− ${rp(benefit)}</div></div>
+      <div><div style="font-size:13px;opacity:.8">Klaim (uang masuk MFlash CARE)</div><div style="font-size:20px;font-weight:700">− ${rp(klaim)}</div></div>
+      <div><div style="font-size:13px;opacity:.8">Benefit (uang masuk MFlash CARE)</div><div style="font-size:20px;font-weight:700">− ${rp(benefit)}</div></div>
     </div>
     <div class="kpis">
       <div class="kpi"><div class="lbl">Faktur MFlash CARE</div><div class="val">${list.length}</div><div class="sub">${tgl(st.dari)} – ${tgl(st.sampai)}</div></div>
