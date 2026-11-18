@@ -115,7 +115,7 @@ const ROUTES = [
 ];
 function renderNav(active, count) {
   $("#nav").innerHTML = ROUTES.filter((r) => !r[2] || isAdmin())
-    .map(([k, l]) => `<a href="#/${k}" class="${active === k ? "on" : ""}">${l}${k === "pengingat" && count ? `<span class="count">${count}</span>` : ""}${k === "care" && S.jumlahSnSalah ? `<span class="count" title="SN/IMEI tidak valid">${S.jumlahSnSalah}</span>` : ""}</a>`).join("");
+    .map(([k, l]) => `<a href="#/${k}" class="${active === k ? "on" : ""}">${l}${k === "pengingat" && count ? `<span class="count">${count}</span>` : ""}</a>`).join("");
 }
 async function router() {
   charts.splice(0).forEach((c) => c.destroy());
@@ -132,8 +132,6 @@ async function router() {
 async function hitungPengingat() {
   const { count } = await q("v_pengingat", "ref_id", { count: "exact", head: true }).lte("sisa_hari", 0);
   S.jumlahPengingat = count || 0;
-  const r2 = await q("mflash_care", "no_faktur", { count: "exact", head: true }).eq("sn_valid", false);
-  S.jumlahSnSalah = r2.count || 0;
 }
 
 /* ---------- boot ---------- */
@@ -208,7 +206,6 @@ VIEWS.dashboard = async () => {
   const agg = (k) => bulan.map((m) => sum(B.filter((r) => r.periode === m), k));
 
   $("#view").innerHTML = `
-  ${S.jumlahSnSalah ? `<a href="#/care" class="card" style="display:block;border:1px solid #C62828;background:#FDECEA;color:#8E1B1B;margin-bottom:14px;padding:12px 16px;text-decoration:none"><b>⚠ ${S.jumlahSnSalah} faktur MFlash CARE dengan SN/IMEI tidak valid</b> — klik untuk melihat dan menindaklanjuti ke cabang.</a>` : ""}
   <div class="kpis">
     <div class="kpi"><div class="lbl">Mitra aktif</div><div class="val">${mitra}${target ? `<span class="muted" style="font-size:14px"> / ${target}</span>` : ""}</div>
       ${target ? `<div class="bar"><i style="width:${Math.min(100, pct(mitra, target))}%"></i></div><div class="sub">${pct(mitra, target)}% dari target</div>` : `<div class="sub">${sum(K, "akad_aktif")} akad aktif</div>`}</div>
@@ -707,9 +704,8 @@ VIEWS.benefit = async () => {
 
 /* ---------- PENGATURAN (Super Admin) ---------- */
 /* ---------- MFlash CARE (tarikan harian rincian faktur Data Hub, 03.15 WIB) ---------- */
-const SN_BURUK = '<span class="badge b-bad">SN/IMEI tidak valid</span>';
 VIEWS.care = async () => {
-  const st = { dari: bulanIni(), sampai: today(), cari: "", hanyaSalah: false };
+  const st = { dari: bulanIni(), sampai: today(), cari: "" };
   const isi = (v, f) => (v === null || v === undefined || v === "" ? "–" : f ? f(v) : esc(v));
   const hariIni = today();
   const sisa = (d) => d ? Math.round((new Date(d) - new Date(hariIni)) / 86400000) : null;
@@ -726,24 +722,19 @@ VIEWS.care = async () => {
     return `${tgl(r.garansi_sd)}${beda ? `<small>Jasa servis s/d ${tgl(r.jasa_sd)}</small>` : ""}<div>${statusGaransi(r)}</div>`;
   };
   const kolomSN = (r) => r.sn_valid === false
-    ? `<span style="color:#C62828;font-weight:600">${isi(r.sn_imei)}</span><div>${SN_BURUK}</div><small style="color:#C62828">${esc(r.sn_catatan || "")}</small>`
+    ? `<span style="color:#C62828;font-weight:700" title="${esc(r.sn_catatan || "SN/IMEI salah")}">${r.sn_imei ? esc(r.sn_imei) : "(kosong)"}</span>`
     : isi(r.sn_imei);
   async function draw() {
     const rows = cek(await q("mflash_care").gte("tgl", st.dari).lte("tgl", st.sampai).order("tgl", { ascending: false }).order("no_faktur"));
     const k = st.cari.trim().toUpperCase();
-    let list = k ? rows.filter((r) => [r.no_faktur, r.cabang, r.nama_pelanggan, r.nama_produk, r.sn_imei].some((v) => String(v || "").toUpperCase().includes(k))) : rows;
-    const salah = list.filter((r) => r.sn_valid === false);
-    if (st.hanyaSalah) list = salah;
+    const list = k ? rows.filter((r) => [r.no_faktur, r.cabang, r.nama_pelanggan, r.nama_produk, r.sn_imei].some((v) => String(v || "").toUpperCase().includes(k))) : rows;
     const sum = (f) => list.reduce((a, r) => a + Number(r[f] || 0), 0);
     const log = isAdmin() ? (await sb.from("log_tarik_hub").select("*").order("waktu", { ascending: false }).limit(1)).data?.[0] : null;
     $("#view").innerHTML = `
-    ${salah.length ? `<div class="card" style="border:1px solid #C62828;background:#FDECEA;color:#8E1B1B;margin-bottom:14px;padding:12px 16px">
-      <b>⚠ ${salah.length} faktur dengan SN/IMEI tidak valid</b> pada periode ini. Input wajib sesuai Juklak 3.1 c (HP: IMEI 15 digit dari *#06#; laptop: Device ID / nomor seri). Pelanggaran dikenai sanksi (3.1 h).
-      <button class="btn sm" id="cSalah" style="margin-left:8px">${st.hanyaSalah ? "Tampilkan semua" : "Lihat yang tidak valid"}</button></div>` : ""}
     <div class="kpis">
       <div class="kpi"><div class="lbl">Faktur MFlash CARE</div><div class="val">${list.length}</div><div class="sub">${tgl(st.dari)} – ${tgl(st.sampai)}</div></div>
       <div class="kpi"><div class="lbl">Total Jasa QC</div><div class="val">${rpJt(sum("harga_jasa_qc"))}</div><div class="sub">porsi Dana MFlash CARE</div></div>
-      <div class="kpi"><div class="lbl">SN/IMEI tidak valid</div><div class="val" style="color:${salah.length ? "#C62828" : "inherit"}">${salah.length}</div><div class="sub">perlu diperbaiki cabang</div></div>
+      <div class="kpi"><div class="lbl">Total nilai faktur</div><div class="val">${rpJt(sum("total_faktur"))}</div><div class="sub">unit + Jasa QC + bundling</div></div>
     </div>
     <div class="toolbar">
       <label>Dari <input type="date" id="cDari" value="${st.dari}"></label>
@@ -753,12 +744,12 @@ VIEWS.care = async () => {
       <button class="btn" id="cCsv">Unduh CSV</button>
       ${isAdmin() ? `<button class="btn primary" id="cTarik">Tarik sekarang</button>` : ""}
     </div>
-    <p class="muted" style="margin:-4px 0 10px">Data ditarik otomatis dari rincian faktur Data Hub MFlash setiap hari pukul 03.15 WIB (3 hari terakhir). Yang ditampilkan hanya faktur yang memuat baris Jasa QC; faktur klaim / benefit (MC-MF) tidak termasuk.
+    <p class="muted" style="margin:-4px 0 10px">SN/IMEI berwarna <b style="color:#C62828">merah</b> berarti salah / tidak sesuai Juklak 3.1 c (arahkan kursor untuk melihat alasannya). Data ditarik otomatis dari rincian faktur Data Hub MFlash setiap hari pukul 03.15 WIB (3 hari terakhir). Yang ditampilkan hanya faktur yang memuat baris Jasa QC; faktur klaim / benefit (MC-MF) tidak termasuk.
       Garansi dihitung dari tanggal faktur sesuai juklak: penjualan laptop 1 tahun, penjualan HP 1 tahun (jasa servis s/d 5 tahun), CARE Service laptop 1 tahun / HP 5 tahun, Z Series 1 tahun.
       ${log ? `<br>Tarikan terakhir: ${new Date(log.waktu).toLocaleString("id-ID")} · ${log.ok ? "berhasil" : "gagal"} · ${log.jml_simpan ?? 0} faktur CARE dari ${log.jml_hub ?? 0} faktur${log.ok ? "" : " · " + esc(log.pesan)}` : ""}</p>
     <div class="tbl-wrap">${list.length ? `<table><thead><tr>
       <th>Cabang</th><th>No. faktur</th><th>Tanggal</th><th>Nama pelanggan</th><th>Kategori penjualan</th><th>Kondisi unit</th><th>SN / IMEI</th><th>Nama produk</th><th class="num">Harga produk</th><th class="num">Harga Jasa QC</th><th>Garansi berakhir</th>
-    </tr></thead><tbody>${list.map((r) => `<tr${r.sn_valid === false ? ' style="background:#FFF4F4"' : ""}>
+    </tr></thead><tbody>${list.map((r) => `<tr>
       <td>${esc(r.cabang)}</td><td><b>${esc(r.no_faktur)}</b></td><td>${tgl(r.tgl)}</td><td>${isi(r.nama_pelanggan)}</td>
       <td>${esc(r.kategori)}<small>${esc([r.skema, r.perangkat].filter(Boolean).join(" · "))}</small></td>
       <td>${isi(r.kondisi_unit)}</td><td>${kolomSN(r)}</td><td>${isi(r.nama_produk)}</td>
@@ -767,7 +758,6 @@ VIEWS.care = async () => {
     $("#cDari").onchange = (e) => { st.dari = e.target.value; draw(); };
     $("#cSampai").onchange = (e) => { st.sampai = e.target.value; draw(); };
     $("#cCari").onchange = (e) => { st.cari = e.target.value; draw(); };
-    if ($("#cSalah")) $("#cSalah").onclick = () => { st.hanyaSalah = !st.hanyaSalah; draw(); };
     $("#cCsv").onclick = () => {
       const H = ["CABANG", "NO FAKTUR", "TANGGAL", "NAMA PELANGGAN", "KATEGORI PENJUALAN", "SKEMA", "PERANGKAT", "KONDISI UNIT", "SN/IMEI", "STATUS SN/IMEI", "NAMA PRODUK", "HARGA PRODUK", "HARGA JASA QC", "GARANSI BERAKHIR", "JASA SERVIS S/D", "TOTAL FAKTUR"];
       const L = list.map((r) => [r.cabang, r.no_faktur, r.tgl, r.nama_pelanggan, r.kategori, r.skema, r.perangkat, r.kondisi_unit, r.sn_imei, r.sn_valid === false ? "TIDAK VALID: " + (r.sn_catatan || "") : "OK", r.nama_produk, r.harga_produk, r.harga_jasa_qc, r.garansi_sd, r.jasa_sd, r.total_faktur]);
@@ -784,9 +774,8 @@ VIEWS.care = async () => {
         if (!d.ok) throw new Error(d.pesan || "gagal");
         toast(`${d.jml_care} faktur MFlash CARE diperbarui (dari ${d.jml_hub} faktur hub)`);
       } catch (err) { toast("Tarik gagal: " + err.message, true); }
-      await hitungPengingat(); renderNav("care", S.jumlahPengingat); draw();
+      draw();
     };
-    if (salah.length && !st._notif) { st._notif = true; toast(`⚠ ${salah.length} faktur MFlash CARE dengan SN/IMEI tidak valid`, true); }
   }
   await draw();
 };
