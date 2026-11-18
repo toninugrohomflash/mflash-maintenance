@@ -733,6 +733,7 @@ VIEWS.care = async () => {
     const qcJual = perSkema("PENJUALAN"), qcZ = perSkema("Z SERIES"), qcSvc = perSkema("CARE SERVICE");
     const log = isAdmin() ? (await sb.from("log_tarik_hub").select("*").order("waktu", { ascending: false }).limit(1)).data?.[0] : null;
     $("#view").innerHTML = `
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px"><img src="logo-care.png" alt="MFlash CARE" style="height:72px;border-radius:12px"><div class="muted" style="line-height:1.4">Proteksi penjualan unit second, service HP &amp; laptop, dan service Galaxy Z Series</div></div>
     <div class="kpis">
       <div class="kpi"><div class="lbl">Faktur MFlash CARE</div><div class="val">${list.length}</div><div class="sub">${tgl(st.dari)} – ${tgl(st.sampai)}</div></div>
       <div class="kpi"><div class="lbl">Total Jasa QC</div><div class="val">${rp(sum("harga_jasa_qc"))}</div><div class="sub">porsi Dana MFlash CARE</div></div>
