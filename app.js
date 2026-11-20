@@ -707,7 +707,7 @@ VIEWS.benefit = async () => {
 const skemaBadge = (s) => s === "Z SERIES" ? '<span class="badge" style="background:#13285C;color:#fff">Service Z Series</span>'
   : s === "CARE SERVICE" ? '<span class="badge" style="background:#F7891A;color:#fff">CARE Service</span>'
   : '<span class="badge" style="background:#E8EEF8;color:#13285C">Penjualan</span>';
-const BENEFIT_LBL = { "HYDROGEL": "Pergantian hydrogel", "MOUSE WIRELESS": "Mouse wireless", "KABEL DATA TYPE C": "Kabel data Type C" };
+const BENEFIT_LBL = { "HYDROGEL": "Pergantian hydrogel", "MOUSE WIRELESS": "Mouse wireless", "KABEL DATA TYPE C": "Kabel data Luna", "RING STAND GRIP": "Ring stand grip" };
 async function detailCare(r) {
   const [{ data: rinci }, { data: mc }] = await Promise.all([
     sb.from("mflash_care_baris").select("*").eq("cabang", r.cabang).eq("no_faktur", r.no_faktur).order("baris"),
@@ -727,7 +727,7 @@ async function detailCare(r) {
         <div style="font-weight:700;font-size:16px">${BENEFIT_LBL[r.benefit_jenis] || esc(r.benefit_jenis)}</div>
         <div style="margin-top:4px">${r.benefit_diambil ? `<span class="badge b-good">Sudah diambil</span> · faktur <b>${esc(r.benefit_faktur)}</b> · ${tgl(r.benefit_tgl)} · ${esc(r.benefit_cabang)}` : `<span class="badge b-warn">Belum diambil</span> · belum ada faktur MC-MF dengan produk ${BENEFIT_LBL[r.benefit_jenis] ? BENEFIT_LBL[r.benefit_jenis].toLowerCase() : ""} untuk nomor faktur ini`}</div>
         ${r.benefit_catatan ? `<div style="color:#C62828;font-weight:600;margin-top:6px">⚠ ${esc(r.benefit_catatan)}</div>` : ""}
-        <small>Sah bila faktur bernomor MC-…${esc(r.no_faktur)}, uang masuk melalui MFlash CARE, dan memuat produk benefit (nama produk berisi HYDROGEL / MOUSE / KABEL).</small></div>`;
+        <small>Sah bila faktur bernomor MC-…${esc(r.no_faktur)}, uang masuk melalui MFlash CARE, dan memuat produk benefit (nama produk berisi HYDROGEL / MOUSE / KABEL / RING / GRIP). CARE Service: Jasa QC ≤ Rp 10.000 → ring stand grip, di atas Rp 10.000 → kabel data Luna.</small></div>`;
   const mcGrup = {};
   (mc || []).forEach((m) => { (mcGrup[m.cabang + "|" + m.no_faktur] ||= []).push(m); });
   const riw = Object.keys(mcGrup).length ? Object.values(mcGrup).map((g) => `<div style="margin-bottom:12px"><b>${esc(g[0].no_faktur)}</b> · ${tgl(g[0].tgl)} · ${esc(g[0].cabang)} · uang masuk: ${(!g[0].uang_masuk || /mflash\s*care/i.test(g[0].uang_masuk)) && /^MC[\s.\-]/i.test(g[0].no_faktur || "") ? (g[0].uang_masuk ? esc(g[0].uang_masuk) : "(tidak terkirim dari Data Hub – dianggap MFlash CARE sementara)") : `<span style="color:#C62828;font-weight:700">${g[0].uang_masuk ? esc(g[0].uang_masuk) : "(kosong)"} – tidak dihitung, kemungkinan salah input</span>`}
