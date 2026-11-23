@@ -726,7 +726,7 @@ async function detailCare(r, kembali) {
     : (r.perangkat === "HP" ? "Jasa servis: maks 5x klaim / 5 tahun · sparepart 1x klaim / 1 tahun" : "Jasa servis: maks 1x klaim / 1 tahun · sparepart 1x klaim / 1 tahun");
   const ben = !r.benefit_jenis ? '<p class="muted">Skema ini tidak memiliki benefit barang.</p>'
     : `<div style="padding:14px 16px;border-radius:12px;border:1px solid ${r.benefit_diambil ? "#2E7D32" : "#E65100"};background:${r.benefit_diambil ? "#EDF7EE" : "#FFF3E0"}">
-        <div style="font-weight:700;font-size:16px">${BENEFIT_LBL[r.benefit_jenis] || esc(r.benefit_jenis)}</div>
+        <div style="font-weight:700;font-size:16px">${BENEFIT_LBL[r.benefit_jenis] || esc(r.benefit_jenis)}${r.benefit_jenis === "HYDROGEL" && (r.skema === "Z SERIES" || /Z\s*(FOLD|FLIP)/i.test(r.nama_produk || "")) ? " layar depan" : ""}</div>
         <div style="margin-top:4px">${r.benefit_diambil ? `<span class="badge b-good">Sudah diambil</span> · faktur <b>${esc(r.benefit_faktur)}</b> · ${tgl(r.benefit_tgl)} · ${esc(r.benefit_cabang)}` : `<span class="badge b-warn">Belum diambil</span> · belum ada faktur MC-MF dengan produk ${BENEFIT_LBL[r.benefit_jenis] ? BENEFIT_LBL[r.benefit_jenis].toLowerCase() : ""} untuk nomor faktur ini`}</div>
         ${r.benefit_catatan ? `<div style="color:#C62828;font-weight:600;margin-top:6px">⚠ ${esc(r.benefit_catatan)}</div>` : ""}
         <small>Sah bila faktur bernomor MC-…${esc(r.no_faktur)}, uang masuk melalui MFlash CARE, dan memuat produk benefit (nama produk berawalan BN). CARE Service: 1 pcs aksesoris dengan harga di bawah nilai Jasa QC faktur ini${r.skema === "CARE SERVICE" ? ` (di bawah ${rp(r.harga_jasa_qc || 0)})` : ""}. Faktur klaim memakai MC1-MF, MC2-MF, dst. sesuai urutan klaim.</small></div>`;
