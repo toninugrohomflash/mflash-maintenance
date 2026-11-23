@@ -708,7 +708,7 @@ const skemaBadge = (s) => s === "Z SERIES" ? '<span class="badge" style="backgro
   : s === "CARE SERVICE" ? '<span class="badge" style="background:#F7891A;color:#fff">CARE Service</span>'
   : '<span class="badge" style="background:#E8EEF8;color:#13285C">Penjualan</span>';
 const BENEFIT_LBL = { "HYDROGEL": "Pergantian hydrogel", "MOUSE WIRELESS": "Mouse wireless", "KABEL DATA TYPE C": "Kabel data Type C" };
-async function detailCare(r) {
+async function detailCare(r, kembali) {
   const [{ data: rinci }, { data: mc }] = await Promise.all([
     sb.from("mflash_care_baris").select("*").eq("cabang", r.cabang).eq("no_faktur", r.no_faktur).order("baris"),
     sb.from("mflash_care_mc").select("*").eq("ref_faktur", r.no_faktur).order("tgl").order("no_faktur").order("baris"),
@@ -741,9 +741,63 @@ async function detailCare(r) {
     mc: riw,
   };
   const label = { info: "Info faktur", rinci: "Rincian barang", proteksi: "Masa proteksi", benefit: "Benefit", mc: "Klaim & benefit (MC-MF)" };
-  modal(`Faktur ${r.no_faktur}`, `<div class="tabs" id="dTabs">${Object.keys(label).map((k, i) => `<button data-t="${k}" class="${i ? "" : "on"}">${label[k]}${k === "benefit" && r.benefit_jenis ? (r.benefit_diambil ? " ✓" : " •") : ""}</button>`).join("")}</div><div id="dBody" style="padding-top:14px">${tabs.info}</div>`, (el) => {
+  modal(`Faktur ${r.no_faktur}`, `${kembali ? '<button class="btn" id="dBack" style="margin-bottom:10px">‹ Kembali ke daftar klaim &amp; benefit</button>' : ""}<div class="tabs" id="dTabs">${Object.keys(label).map((k, i) => `<button data-t="${k}" class="${i ? "" : "on"}">${label[k]}${k === "benefit" && r.benefit_jenis ? (r.benefit_diambil ? " ✓" : " •") : ""}</button>`).join("")}</div><div id="dBody" style="padding-top:14px">${tabs.info}</div>`, (el) => {
     el.closest(".modal-card").style.maxWidth = "860px";
+    if (kembali) $("#dBack").onclick = kembali;
     $$("#dTabs button").forEach((b) => (b.onclick = () => { $$("#dTabs button").forEach((x) => x.classList.toggle("on", x === b)); $("#dBody").innerHTML = tabs[b.dataset.t]; }));
+  });
+}
+
+// daftar faktur MC-MF (klaim / benefit) beserta faktur asal dan Jasa QC-nya
+function daftarMC(awal, mcSah, mcSalah, semuaQC) {
+  const asal = {};
+  semuaQC.forEach((r) => { (asal[String(r.no_faktur).trim().toUpperCase()] ||= []).push(r); });
+  const grup = (rows) => {
+    const g = {};
+    rows.forEach((m) => { (g[m.cabang + "|" + m.no_faktur] ||= []).push(m); });
+    return Object.values(g);
+  };
+  const tabel = (rows, kosong) => {
+    const G = grup(rows);
+    if (!G.length) return `<p class="muted">${kosong}</p>`;
+    const total = rows.reduce((a, m) => a + Number(m.nilai || 0), 0);
+    return `<p class="muted" style="margin:0 0 8px">${G.length} faktur · total ${rp(total)}. Klik baris yang faktur asalnya ditemukan untuk membuka faktur asal.</p>
+    <div class="tbl-wrap"><table class="mc-tbl"><thead><tr><th>Cabang klaim</th><th>No. faktur MC-MF</th><th>Tgl</th><th>Produk</th><th class="num">Nilai</th><th>Atas faktur</th><th>Jasa QC faktur asal</th></tr></thead><tbody>${G.map((g, ix) => {
+      const m = g[0];
+      const ref = String(m.ref_faktur || "").trim().toUpperCase();
+      const cocok = asal[ref] || [];
+      const a = cocok.find((r) => r.cabang === m.cabang) || cocok[0];
+      const nilai = g.reduce((x, b) => x + Number(b.nilai || 0), 0);
+      const qc = a ? `<span class="badge b-good">Ada</span> ${rp(a.harga_jasa_qc)}<small>${esc(a.cabang)} · ${tgl(a.tgl)}${a.nama_pelanggan ? " · " + esc(a.nama_pelanggan) : ""}</small>`
+        : `<span style="color:#C62828;font-weight:700">Tidak ada</span><small style="color:#C62828">faktur asal tidak ditemukan / tidak memuat Jasa QC</small>`;
+      return `<tr data-g="${ix}" style="${a ? "cursor:pointer" : ""}">
+        <td>${esc(m.cabang)}</td><td><b>${esc(m.no_faktur)}</b>${m.uang_masuk ? `<small>uang masuk: ${esc(m.uang_masuk)}</small>` : ""}</td><td>${tgl(m.tgl)}</td>
+        <td>${g.map((b) => esc(b.nama) + (b.jenis !== "KLAIM" ? ` <small>${esc(BENEFIT_LBL[b.jenis] || b.jenis)}</small>` : "")).join("<br>")}</td>
+        <td class="num">${rp(nilai)}</td><td>${a ? `<b style="color:var(--brand)">${esc(m.ref_faktur)}</b>` : esc(m.ref_faktur || "–")}</td><td>${qc}</td></tr>`;
+    }).join("")}</tbody></table></div>`;
+  };
+  const isi = {
+    klaim: () => tabel(mcSah.filter((m) => m.jenis === "KLAIM"), "Belum ada faktur klaim MC-MF."),
+    benefit: () => tabel(mcSah.filter((m) => m.jenis !== "KLAIM"), "Belum ada faktur benefit MC-MF."),
+    salah: () => tabel(mcSalah, "Tidak ada faktur yang salah input."),
+  };
+  const label = { klaim: "Klaim", benefit: "Benefit", salah: `Tidak dihitung (${grup(mcSalah).length})` };
+  const pasang = (t) => {
+    $("#mBody").innerHTML = isi[t]();
+    const G = grup(t === "klaim" ? mcSah.filter((m) => m.jenis === "KLAIM") : t === "benefit" ? mcSah.filter((m) => m.jenis !== "KLAIM") : mcSalah);
+    $$("#mBody .mc-tbl tbody tr").forEach((tr) => (tr.onclick = async () => {
+      const m = G[+tr.dataset.g][0];
+      const ref = String(m.ref_faktur || "").trim();
+      if (!ref) return;
+      const { data } = await sb.from("mflash_care").select("*").ilike("no_faktur", ref);
+      if (!data || !data.length) return;
+      detailCare(data.find((r) => r.cabang === m.cabang) || data[0], () => daftarMC(t, mcSah, mcSalah, semuaQC));
+    }));
+  };
+  modal("Faktur klaim & benefit MFlash CARE", `<div class="tabs" id="mTabs">${Object.keys(label).map((k) => `<button data-t="${k}" class="${k === awal ? "on" : ""}">${label[k]}</button>`).join("")}</div><div id="mBody" style="padding-top:14px"></div>`, (el) => {
+    el.closest(".modal-card").style.maxWidth = "1100px";
+    $$("#mTabs button").forEach((b) => (b.onclick = () => { $$("#mTabs button").forEach((x) => x.classList.toggle("on", x === b)); pasang(b.dataset.t); }));
+    pasang(awal);
   });
 }
 
@@ -776,8 +830,8 @@ VIEWS.care = async () => {
     const qcJual = perSkema("PENJUALAN"), qcZ = perSkema("Z SERIES"), qcSvc = perSkema("CARE SERVICE");
     // saldo kumulatif (sejak awal program, tidak terpengaruh filter tanggal)
     const [{ data: semuaQC }, { data: semuaMC }] = await Promise.all([
-      q("mflash_care", "no_faktur,harga_jasa_qc"),
-      sb.from("mflash_care_mc").select("no_faktur,ref_faktur,jenis,nilai,uang_masuk"),
+      q("mflash_care", "cabang,no_faktur,tgl,nama_pelanggan,skema,harga_jasa_qc"),
+      sb.from("mflash_care_mc").select("*").order("tgl", { ascending: false }).order("no_faktur").order("baris"),
     ]);
     const milikSaya = new Set((semuaQC || []).map((r) => r.no_faktur));
     // dihitung hanya faktur bernomor MC-MF DAN uang masuk melalui MFlash CARE; selain itu kemungkinan salah input
@@ -790,14 +844,15 @@ VIEWS.care = async () => {
     const klaim = mcList.filter((m) => m.jenis === "KLAIM").reduce((a, m) => a + Number(m.nilai || 0), 0);
     const benefit = mcList.filter((m) => m.jenis !== "KLAIM").reduce((a, m) => a + Number(m.nilai || 0), 0);
     const saldo = danaMasuk - klaim - benefit;
+    const nFaktur = (a) => new Set(a.map((m) => m.cabang + "|" + m.no_faktur)).size;
     const log = isAdmin() ? (await sb.from("log_tarik_hub").select("*").order("waktu", { ascending: false }).limit(1)).data?.[0] : null;
     $("#view").innerHTML = `
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px"><img src="logo-care.png" alt="MFlash CARE" style="height:72px;border-radius:12px"><div class="muted" style="line-height:1.4">Proteksi penjualan unit second, service HP &amp; laptop, dan service Galaxy Z Series</div></div>
     <div class="card saldo-care" style="background:#13285C;color:#fff;border-radius:16px;padding:18px 22px;margin-bottom:16px;display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;gap:16px;align-items:center">
       <div><div style="font-size:13px;opacity:.8">Sisa saldo MFlash CARE</div><div style="font-size:30px;font-weight:800;color:${saldo < 0 ? "#FF8A80" : "#FFB15C"}">${rp(saldo)}</div><div style="font-size:12px;opacity:.75">kumulatif sejak awal program${isAdmin() && !S.fc ? "" : " · cabang ini"}</div>${mcSalah.length ? `<div style="font-size:12px;color:#FF8A80;margin-top:4px" title="${esc(mcSalah.join(", "))}">${mcSalah.length} faktur tidak dihitung (kemungkinan salah input): ${esc(mcSalah.slice(0, 3).join(", "))}${mcSalah.length > 3 ? "…" : ""}</div>` : ""}</div>
       <div><div style="font-size:13px;opacity:.8">Dana masuk (Jasa QC)</div><div style="font-size:20px;font-weight:700">${rp(danaMasuk)}</div></div>
-      <div><div style="font-size:13px;opacity:.8">Klaim (MC-MF + uang masuk MFlash CARE)</div><div style="font-size:20px;font-weight:700">− ${rp(klaim)}</div></div>
-      <div><div style="font-size:13px;opacity:.8">Benefit (MC-MF + uang masuk MFlash CARE)</div><div style="font-size:20px;font-weight:700">− ${rp(benefit)}</div></div>
+      <div class="mc-klik" data-t="klaim" style="cursor:pointer" title="Klik untuk melihat daftar faktur klaim"><div style="font-size:13px;opacity:.8">Klaim (MC-MF + uang masuk MFlash CARE)</div><div style="font-size:20px;font-weight:700">− ${rp(klaim)}</div><div style="font-size:12px;color:#FFB15C;text-decoration:underline">${nFaktur(mcList.filter((m) => m.jenis === "KLAIM"))} faktur · lihat rincian ›</div></div>
+      <div class="mc-klik" data-t="benefit" style="cursor:pointer" title="Klik untuk melihat daftar faktur benefit"><div style="font-size:13px;opacity:.8">Benefit (MC-MF + uang masuk MFlash CARE)</div><div style="font-size:20px;font-weight:700">− ${rp(benefit)}</div><div style="font-size:12px;color:#FFB15C;text-decoration:underline">${nFaktur(mcList.filter((m) => m.jenis !== "KLAIM"))} faktur · lihat rincian ›</div></div>
     </div>
     <div class="kpis">
       <div class="kpi"><div class="lbl">Faktur MFlash CARE</div><div class="val">${list.length}</div><div class="sub">${tgl(st.dari)} – ${tgl(st.sampai)}</div></div>
@@ -827,6 +882,7 @@ VIEWS.care = async () => {
       <td>${esc(r.kategori)}</td><td>${skemaBadge(r.skema)}</td><td class="num">${isi(r.harga_jasa_qc, rp)}</td></tr>`).join("")}
     </tbody></table>` : `<div class="empty">Belum ada faktur MFlash CARE pada rentang tanggal ini.</div>`}</div>`;
     $$(".tbl-klik tbody tr").forEach((tr) => (tr.onclick = () => detailCare(list[+tr.dataset.ix])));
+    $$(".mc-klik").forEach((d) => (d.onclick = () => daftarMC(d.dataset.t, mcList, mcSemua.filter((m) => !sahMC(m)), semuaQC || [])));
     $("#cDari").onchange = (e) => { st.dari = e.target.value; draw(); };
     $("#cSampai").onchange = (e) => { st.sampai = e.target.value; draw(); };
     $("#cCari").onchange = (e) => { st.cari = e.target.value; draw(); };
