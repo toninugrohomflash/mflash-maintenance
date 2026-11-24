@@ -44,6 +44,27 @@ function toast(msg, bad = false) {
   const t = $("#toast"); t.textContent = msg; t.className = "toast" + (bad ? " bad" : "");
   clearTimeout(t._t); t._t = setTimeout(() => t.classList.add("hidden"), bad ? 6000 : 3000);
 }
+// ambil semua baris (Supabase membatasi 1.000 baris per permintaan)
+async function ambilSemua(buat) {
+  let out = [];
+  for (let i = 0; ; i += 1000) {
+    const { data, error } = await buat().range(i, i + 999);
+    if (error) { toast(error.message, true); throw error; }
+    out = out.concat(data || []);
+    if (!data || data.length < 1000) return out;
+  }
+}
+// unduh Excel: sheets = [{ nama, kolom: [judul...], baris: [[...]] }]
+function unduhExcel(namaFile, sheets) {
+  if (!window.XLSX) { toast("Modul Excel belum termuat, coba muat ulang halaman", true); return; }
+  const wb = XLSX.utils.book_new();
+  sheets.forEach((sh) => {
+    const ws = XLSX.utils.aoa_to_sheet([sh.kolom, ...sh.baris]);
+    ws["!cols"] = sh.kolom.map((k, i) => ({ wch: Math.min(45, Math.max(String(k).length, ...sh.baris.slice(0, 300).map((b) => String(b[i] ?? "").length)) + 2) }));
+    XLSX.utils.book_append_sheet(wb, ws, sh.nama.slice(0, 31));
+  });
+  XLSX.writeFile(wb, namaFile);
+}
 function cek({ data, error }) { if (error) { toast(error.message, true); throw error; } return data; }
 function modal(title, html, onOpen) {
   $("#modalTitle").textContent = title; $("#modalBody").innerHTML = html;
@@ -750,6 +771,40 @@ async function detailCare(r, kembali) {
   });
 }
 
+// rincian kartu dashboard: daftar faktur, bisa dicari, diurutkan, diklik dan diunduh Excel
+function daftarRekap(judul, rows, kolNilai) {
+  const st = { cari: "", urut: "nilai" };
+  const nilai = (r) => Number(r[kolNilai] || 0);
+  const lbl = kolNilai === "total_faktur" ? "Total faktur" : "Jasa QC";
+  const tampil = () => {
+    const k = st.cari.trim().toUpperCase();
+    let L = k ? rows.filter((r) => [r.cabang, r.no_faktur, r.nama_pelanggan, r.kategori].some((v) => String(v || "").toUpperCase().includes(k))) : rows.slice();
+    L.sort(st.urut === "nilai" ? (a, b) => nilai(b) - nilai(a) : st.urut === "tgl" ? (a, b) => String(b.tgl).localeCompare(String(a.tgl)) : (a, b) => String(a.cabang).localeCompare(String(b.cabang)) || String(a.no_faktur).localeCompare(String(b.no_faktur)));
+    return L;
+  };
+  const gambar = () => {
+    const L = tampil();
+    $("#rkBody").innerHTML = `<p class="muted" style="margin:0 0 8px">${L.length} faktur · total ${lbl} <b>${rp(L.reduce((a, r) => a + nilai(r), 0))}</b>. Klik baris untuk membuka rincian faktur.</p>
+    <div class="tbl-wrap" style="max-height:60vh;overflow:auto"><table class="tbl-klik"><thead><tr><th>#</th><th>Cabang</th><th>No. faktur</th><th>Tgl</th><th>Nama pelanggan</th><th>Skema</th><th class="num">Jasa QC</th><th class="num">Total faktur</th></tr></thead><tbody>
+    ${L.map((r, i) => `<tr data-i="${i}" style="cursor:pointer"><td>${i + 1}</td><td>${esc(r.cabang)}</td><td><b style="color:var(--brand)">${esc(r.no_faktur)}</b></td><td>${tgl(r.tgl)}</td><td>${esc(r.nama_pelanggan || "–")}</td><td>${skemaBadge(r.skema)}</td><td class="num">${rp(r.harga_jasa_qc || 0)}</td><td class="num">${rp(r.total_faktur || 0)}</td></tr>`).join("")}
+    </tbody></table></div>`;
+    $$("#rkBody tbody tr").forEach((tr) => (tr.onclick = async () => {
+      const r = L[+tr.dataset.i];
+      const { data } = await sb.from("mflash_care").select("*").eq("cabang", r.cabang).eq("no_faktur", r.no_faktur).limit(1);
+      if (data && data[0]) detailCare(data[0], () => daftarRekap(judul, rows, kolNilai));
+    }));
+  };
+  modal(judul, `<div class="toolbar" style="margin-bottom:10px"><input type="search" id="rkCari" placeholder="Cari cabang, faktur, pelanggan…" style="flex:1">
+    <select id="rkUrut"><option value="nilai">Urut: ${lbl} terbesar</option><option value="tgl">Urut: tanggal terbaru</option><option value="cabang">Urut: cabang</option></select>
+    <button class="btn" id="rkXls">Unduh Excel</button></div><div id="rkBody"></div>`, (el) => {
+    el.closest(".modal-card").style.maxWidth = "1100px";
+    $("#rkCari").oninput = (e) => { st.cari = e.target.value; gambar(); };
+    $("#rkUrut").onchange = (e) => { st.urut = e.target.value; gambar(); };
+    $("#rkXls").onclick = () => unduhExcel(`${judul.replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_")}.xlsx`, [{ nama: "Rincian", kolom: ["CABANG", "NO FAKTUR", "TANGGAL", "NAMA PELANGGAN", "KATEGORI", "SKEMA", "JASA QC", "TOTAL FAKTUR"], baris: tampil().map((r) => [r.cabang, r.no_faktur, r.tgl, r.nama_pelanggan, r.kategori, r.skema, Number(r.harga_jasa_qc || 0), Number(r.total_faktur || 0)]) }]);
+    gambar();
+  });
+}
+
 // daftar faktur MC-MF (klaim / benefit) beserta faktur asal dan Jasa QC-nya
 function daftarMC(awal, mcSah, mcSalah, semuaQC) {
   const asal = {};
@@ -830,16 +885,16 @@ VIEWS.care = async () => {
     ? `<span style="color:#C62828;font-weight:700" title="${esc(r.sn_catatan || "SN/IMEI salah")}">${r.sn_imei ? esc(r.sn_imei) : "(kosong)"}</span>`
     : isi(r.sn_imei);
   async function draw() {
-    const rows = cek(await q("mflash_care").gte("tgl", st.dari).lte("tgl", st.sampai).order("tgl", { ascending: false }).order("no_faktur"));
+    const rows = await ambilSemua(() => q("mflash_care").gte("tgl", st.dari).lte("tgl", st.sampai).order("tgl", { ascending: false }).order("no_faktur"));
     const k = st.cari.trim().toUpperCase();
     const list = k ? rows.filter((r) => [r.no_faktur, r.cabang, r.nama_pelanggan, r.nama_produk, r.sn_imei].some((v) => String(v || "").toUpperCase().includes(k))) : rows;
     const sum = (f) => list.reduce((a, r) => a + Number(r[f] || 0), 0);
     const perSkema = (sk) => { const x = list.filter((r) => (r.skema || "PENJUALAN") === sk); return { n: x.length, qc: x.reduce((a, r) => a + Number(r.harga_jasa_qc || 0), 0) }; };
     const qcJual = perSkema("PENJUALAN"), qcZ = perSkema("Z SERIES"), qcSvc = perSkema("CARE SERVICE");
     // saldo kumulatif (sejak awal program, tidak terpengaruh filter tanggal)
-    const [{ data: semuaQC }, { data: semuaMC }] = await Promise.all([
-      q("mflash_care", "cabang,no_faktur,tgl,nama_pelanggan,skema,perangkat,harga_jasa_qc"),
-      sb.from("mflash_care_mc").select("*").order("tgl", { ascending: false }).order("no_faktur").order("baris"),
+    const [semuaQC, semuaMC] = await Promise.all([
+      ambilSemua(() => q("mflash_care", "cabang,cabang_id,no_faktur,tgl,nama_pelanggan,kategori,skema,perangkat,harga_jasa_qc,total_faktur").order("tgl", { ascending: false }).order("no_faktur")),
+      ambilSemua(() => sb.from("mflash_care_mc").select("*").order("tgl", { ascending: false }).order("no_faktur").order("baris")),
     ]);
     const milikSaya = new Set((semuaQC || []).map((r) => r.no_faktur));
     // dihitung hanya faktur bernomor MC-MF DAN uang masuk melalui MFlash CARE; selain itu kemungkinan salah input
@@ -858,7 +913,7 @@ VIEWS.care = async () => {
       const P = {}, idDariHub = {};
       const kunci = (id, nama) => (id ? "id" + id : "n" + String(nama || "").toUpperCase());
       const nmCab = (id, nama) => (id && (S.cabang || []).find((c) => c.id === id)?.nama) || nama || "–";
-      const baru = (k, nama) => (P[k] ||= { nama, n: 0, jual: 0, z: 0, svc: 0, berhak: 0, diambil: 0, klaim: 0 });
+      const baru = (k, nama) => (P[k] ||= { k, nama, n: 0, jual: 0, z: 0, svc: 0, berhak: 0, diambil: 0, klaim: 0 });
       if (isAdmin() && !S.fc) (S.cabang || []).forEach((c) => baru("id" + c.id, c.nama));
       list.forEach((r) => {
         if (r.cabang_id) idDariHub[String(r.cabang).toUpperCase()] = r.cabang_id;
@@ -883,24 +938,24 @@ VIEWS.care = async () => {
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px"><img src="logo-care.png" alt="MFlash CARE" style="height:72px;border-radius:12px"><div class="muted" style="line-height:1.4">Proteksi penjualan unit second, service HP &amp; laptop, dan service Galaxy Z Series</div></div>
     <div class="card saldo-care" style="background:#13285C;color:#fff;border-radius:16px;padding:18px 22px;margin-bottom:16px;display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;gap:16px;align-items:center">
       <div><div style="font-size:13px;opacity:.8">Sisa saldo MFlash CARE</div><div style="font-size:30px;font-weight:800;color:${saldo < 0 ? "#FF8A80" : "#FFB15C"}">${rp(saldo)}</div><div style="font-size:12px;opacity:.75">kumulatif sejak awal program${isAdmin() && !S.fc ? "" : " · cabang ini"}</div>${mcSalah.length ? `<div style="font-size:12px;color:#FF8A80;margin-top:4px" title="${esc(mcSalah.join(", "))}">${mcSalah.length} faktur tidak dihitung (kemungkinan salah input): ${esc(mcSalah.slice(0, 3).join(", "))}${mcSalah.length > 3 ? "…" : ""}</div>` : ""}</div>
-      <div><div style="font-size:13px;opacity:.8">Dana masuk (Jasa QC)</div><div style="font-size:20px;font-weight:700">${rp(danaMasuk)}</div></div>
+      <div class="rk-klik" data-k="dana" style="cursor:pointer" title="Klik untuk melihat daftar faktur"><div style="font-size:13px;opacity:.8">Dana masuk (Jasa QC)</div><div style="font-size:20px;font-weight:700">${rp(danaMasuk)}</div><div style="font-size:12px;color:#FFB15C;text-decoration:underline">${(semuaQC || []).length} faktur · lihat rincian ›</div></div>
       <div class="mc-klik" data-t="klaim" style="cursor:pointer" title="Klik untuk melihat daftar faktur klaim"><div style="font-size:13px;opacity:.8">Klaim (MC-MF + uang masuk MFlash CARE)</div><div style="font-size:20px;font-weight:700">− ${rp(klaim)}</div><div style="font-size:12px;color:#FFB15C;text-decoration:underline">${nFaktur(mcList.filter((m) => m.jenis === "KLAIM"))} faktur · lihat rincian ›</div></div>
       <div class="mc-klik" data-t="benefit" style="cursor:pointer" title="Klik untuk melihat daftar faktur benefit"><div style="font-size:13px;opacity:.8">Benefit (MC-MF + uang masuk MFlash CARE)</div><div style="font-size:20px;font-weight:700">− ${rp(benefit)}</div><div style="font-size:12px;color:#FFB15C;text-decoration:underline">${nFaktur(mcList.filter((m) => m.jenis !== "KLAIM"))} faktur · lihat rincian ›</div></div>
     </div>
     <div class="kpis">
-      <div class="kpi"><div class="lbl">Faktur MFlash CARE</div><div class="val">${list.length}</div><div class="sub">${tgl(st.dari)} – ${tgl(st.sampai)}</div></div>
-      <div class="kpi"><div class="lbl">Total Jasa QC</div><div class="val">${rp(sum("harga_jasa_qc"))}</div><div class="sub">porsi Dana MFlash CARE</div></div>
-      <div class="kpi"><div class="lbl">Total nilai faktur</div><div class="val">${rp(sum("total_faktur"))}</div><div class="sub">unit + Jasa QC + bundling</div></div>
+      <div class="kpi rk-klik" data-k="faktur" style="cursor:pointer" title="Klik untuk melihat rincian"><div class="lbl">Faktur MFlash CARE <span style="color:var(--brand)">›</span></div><div class="val">${list.length}</div><div class="sub">${tgl(st.dari)} – ${tgl(st.sampai)}</div></div>
+      <div class="kpi rk-klik" data-k="qc" style="cursor:pointer" title="Klik untuk melihat rincian"><div class="lbl">Total Jasa QC <span style="color:var(--brand)">›</span></div><div class="val">${rp(sum("harga_jasa_qc"))}</div><div class="sub">porsi Dana MFlash CARE</div></div>
+      <div class="kpi rk-klik" data-k="nilai" style="cursor:pointer" title="Klik untuk melihat rincian"><div class="lbl">Total nilai faktur <span style="color:var(--brand)">›</span></div><div class="val">${rp(sum("total_faktur"))}</div><div class="sub">unit + Jasa QC + bundling</div></div>
     </div>
     <div class="kpis">
-      <div class="kpi"><div class="lbl">Jasa QC Penjualan</div><div class="val">${rp(qcJual.qc)}</div><div class="sub">${qcJual.n} faktur penjualan unit</div></div>
-      <div class="kpi"><div class="lbl">Jasa QC Service Z Series</div><div class="val">${rp(qcZ.qc)}</div><div class="sub">${qcZ.n} faktur servis Z Fold / Z Flip</div></div>
-      <div class="kpi"><div class="lbl">Jasa QC Service Non Z Series</div><div class="val">${rp(qcSvc.qc)}</div><div class="sub">${qcSvc.n} faktur CARE Service HP &amp; laptop</div></div>
+      <div class="kpi rk-klik" data-k="jual" style="cursor:pointer" title="Klik untuk melihat rincian"><div class="lbl">Jasa QC Penjualan <span style="color:var(--brand)">›</span></div><div class="val">${rp(qcJual.qc)}</div><div class="sub">${qcJual.n} faktur penjualan unit</div></div>
+      <div class="kpi rk-klik" data-k="z" style="cursor:pointer" title="Klik untuk melihat rincian"><div class="lbl">Jasa QC Service Z Series <span style="color:var(--brand)">›</span></div><div class="val">${rp(qcZ.qc)}</div><div class="sub">${qcZ.n} faktur servis Z Fold / Z Flip</div></div>
+      <div class="kpi rk-klik" data-k="svc" style="cursor:pointer" title="Klik untuk melihat rincian"><div class="lbl">Jasa QC Service Non Z Series <span style="color:var(--brand)">›</span></div><div class="val">${rp(qcSvc.qc)}</div><div class="sub">${qcSvc.n} faktur CARE Service HP &amp; laptop</div></div>
     </div>
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px"><h3 style="margin:0">Pencapaian per cabang</h3><span class="muted">${tgl(st.dari)} – ${tgl(st.sampai)} · urut dari Jasa QC terbesar</span></div>
       <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Cabang</th><th class="num">Faktur</th><th class="num">Jasa QC Gadget Second</th><th class="num">Jasa QC Z Series</th><th class="num">Jasa QC CARE Service</th><th class="num">Total Jasa QC</th><th style="min-width:140px">Kontribusi</th><th class="num">Benefit diambil</th><th class="num">Klaim dilayani</th></tr></thead><tbody>
-      ${perCabang.map((x, i) => `<tr style="${x.n ? "" : "color:var(--ink-2)"}"><td>${i + 1}</td><td><b>${esc(x.nama)}</b></td><td class="num">${x.n}</td><td class="num">${rp(x.jual)}</td><td class="num">${rp(x.z)}</td><td class="num">${rp(x.svc)}</td><td class="num"><b>${rp(x.total)}</b></td>
+      ${perCabang.map((x, i) => `<tr style="${x.n ? "" : "color:var(--ink-2)"}"><td>${i + 1}</td><td><b class="cab-klik" data-ix="${i}" style="cursor:pointer;color:var(--brand)" title="Klik untuk melihat faktur cabang ini">${esc(x.nama)}</b></td><td class="num">${x.n}</td><td class="num">${rp(x.jual)}</td><td class="num">${rp(x.z)}</td><td class="num">${rp(x.svc)}</td><td class="num"><b>${rp(x.total)}</b></td>
         <td><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;height:8px;background:#E8EEF8;border-radius:4px;overflow:hidden"><div style="width:${(x.total / maxQC) * 100}%;height:100%;background:#F7891A"></div></div><small style="white-space:nowrap">${totalQC ? ((x.total / totalQC) * 100).toLocaleString("id-ID", { maximumFractionDigits: 1 }) : 0}%</small></div></td>
         <td class="num">${x.berhak ? `${x.diambil} / ${x.berhak}` : "–"}</td><td class="num">${x.klaim}</td></tr>`).join("")}
       </tbody><tfoot><tr><th></th><th>Total</th><th class="num">${perCabang.reduce((a, x) => a + x.n, 0)}</th><th class="num">${rp(perCabang.reduce((a, x) => a + x.jual, 0))}</th><th class="num">${rp(perCabang.reduce((a, x) => a + x.z, 0))}</th><th class="num">${rp(perCabang.reduce((a, x) => a + x.svc, 0))}</th><th class="num">${rp(totalQC)}</th><th></th><th class="num">${perCabang.reduce((a, x) => a + x.diambil, 0)} / ${perCabang.reduce((a, x) => a + x.berhak, 0)}</th><th class="num">${perCabang.reduce((a, x) => a + x.klaim, 0)}</th></tr></tfoot></table></div>
@@ -911,7 +966,7 @@ VIEWS.care = async () => {
       <label>Sampai <input type="date" id="cSampai" value="${st.sampai}"></label>
       <input type="search" id="cCari" placeholder="Cari faktur, pelanggan, produk, IMEI…" value="${esc(st.cari)}">
       <span class="spacer"></span>
-      <button class="btn" id="cCsv">Unduh CSV</button>
+      <button class="btn" id="cCsv">Unduh Excel</button>
       ${isAdmin() ? `<button class="btn primary" id="cTarik">Tarik sekarang</button>` : ""}
     </div>
     <p class="muted" style="margin:-4px 0 10px">Klik baris faktur untuk melihat rincian lengkap, masa proteksi, benefit dan riwayat MC-MF. SN/IMEI berwarna <b style="color:#C62828">merah</b> berarti salah / tidak sesuai Juklak 3.1 c (arahkan kursor untuk melihat alasannya). Data ditarik otomatis dari rincian faktur Data Hub MFlash setiap hari pukul 03.15 WIB (3 hari terakhir). Yang ditampilkan hanya faktur yang memuat baris Jasa QC; faktur klaim / benefit (MC-MF) tidak termasuk.
@@ -924,16 +979,30 @@ VIEWS.care = async () => {
       <td>${esc(r.kategori)}</td><td>${skemaBadge(r.skema)}</td><td class="num">${isi(r.harga_jasa_qc, rp)}</td></tr>`).join("")}
     </tbody></table>` : `<div class="empty">Belum ada faktur MFlash CARE pada rentang tanggal ini.</div>`}</div>`;
     $$(".tbl-klik tbody tr").forEach((tr) => (tr.onclick = () => detailCare(list[+tr.dataset.ix])));
+    const REKAP = {
+      dana: ["Dana masuk Jasa QC (kumulatif sejak awal program)", semuaQC || []],
+      faktur: [`Faktur MFlash CARE ${tgl(st.dari)} – ${tgl(st.sampai)}`, list],
+      qc: [`Total Jasa QC ${tgl(st.dari)} – ${tgl(st.sampai)}`, list],
+      nilai: [`Total nilai faktur ${tgl(st.dari)} – ${tgl(st.sampai)}`, list],
+      jual: ["Jasa QC Penjualan Gadget Second", list.filter((r) => (r.skema || "PENJUALAN") === "PENJUALAN")],
+      z: ["Jasa QC Service Z Series", list.filter((r) => r.skema === "Z SERIES")],
+      svc: ["Jasa QC CARE Service HP & Laptop", list.filter((r) => r.skema === "CARE SERVICE")],
+    };
+    $$(".rk-klik").forEach((d) => (d.onclick = () => daftarRekap(...REKAP[d.dataset.k], d.dataset.k === "nilai" ? "total_faktur" : "harga_jasa_qc")));
+    $$(".cab-klik").forEach((d) => (d.onclick = () => { const x = perCabang[+d.dataset.ix]; daftarRekap(`Faktur MFlash CARE cabang ${x.nama}`, list.filter((r) => (r.cabang_id ? "id" + r.cabang_id : "n" + String(r.cabang).toUpperCase()) === x.k), "harga_jasa_qc"); }));
     $$(".mc-klik").forEach((d) => (d.onclick = () => daftarMC(d.dataset.t, mcList, mcSemua.filter((m) => !sahMC(m)), semuaQC || [])));
     $("#cDari").onchange = (e) => { st.dari = e.target.value; draw(); };
     $("#cSampai").onchange = (e) => { st.sampai = e.target.value; draw(); };
     $("#cCari").onchange = (e) => { st.cari = e.target.value; draw(); };
     $("#cCsv").onclick = () => {
-      const H = ["CABANG", "NO FAKTUR", "TANGGAL", "NAMA PELANGGAN", "KATEGORI PENJUALAN", "SKEMA", "PERANGKAT", "KONDISI UNIT", "SN/IMEI", "STATUS SN/IMEI", "NAMA PRODUK", "HARGA PRODUK", "HARGA JASA QC", "GARANSI BERAKHIR", "JASA SERVIS S/D", "TOTAL FAKTUR"];
-      const L = list.map((r) => [r.cabang, r.no_faktur, r.tgl, r.nama_pelanggan, r.kategori, r.skema, r.perangkat, r.kondisi_unit, r.sn_imei, r.sn_valid === false ? "TIDAK VALID: " + (r.sn_catatan || "") : "OK", r.nama_produk, r.harga_produk, r.harga_jasa_qc, r.garansi_sd, r.jasa_sd, r.total_faktur]);
-      const csv = [H, ...L].map((a) => a.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
-      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv" }));
-      a.download = `MFlash_CARE_${st.dari}_sd_${st.sampai}.csv`; a.click();
+      unduhExcel(`MFlash_CARE_${st.dari}_sd_${st.sampai}.xlsx`, [
+        { nama: "Faktur", kolom: ["CABANG", "NO FAKTUR", "TANGGAL", "NAMA PELANGGAN", "KATEGORI PENJUALAN", "SKEMA", "PERANGKAT", "KONDISI UNIT", "SN/IMEI", "STATUS SN/IMEI", "NAMA PRODUK", "HARGA PRODUK", "HARGA JASA QC", "TOTAL FAKTUR", "GARANSI BERAKHIR", "JASA SERVIS S/D", "BENEFIT", "STATUS BENEFIT", "FAKTUR BENEFIT"],
+          baris: list.map((r) => [r.cabang, r.no_faktur, r.tgl, r.nama_pelanggan, r.kategori, r.skema, r.perangkat, r.kondisi_unit, r.sn_imei, r.sn_valid === false ? "TIDAK VALID: " + (r.sn_catatan || "") : "OK", r.nama_produk, Number(r.harga_produk || 0), Number(r.harga_jasa_qc || 0), Number(r.total_faktur || 0), r.garansi_sd, r.jasa_sd, BENEFIT_LBL[r.benefit_jenis] || r.benefit_jenis || "", r.benefit_jenis ? (r.benefit_diambil ? "Sudah diambil" : "Belum diambil") : "", r.benefit_faktur || ""]) },
+        { nama: "Per Cabang", kolom: ["CABANG", "FAKTUR", "JASA QC GADGET SECOND", "JASA QC Z SERIES", "JASA QC CARE SERVICE", "TOTAL JASA QC", "BENEFIT DIAMBIL", "BERHAK BENEFIT", "KLAIM DILAYANI"],
+          baris: perCabang.map((x) => [x.nama, x.n, x.jual, x.z, x.svc, x.total, x.diambil, x.berhak, x.klaim]) },
+        { nama: "Klaim & Benefit MC", kolom: ["CABANG", "NO FAKTUR MC", "TANGGAL", "JENIS", "KLAIM KE", "NAMA PRODUK", "QTY", "NILAI", "ATAS FAKTUR", "UANG MASUK", "DIHITUNG"],
+          baris: mcSemua.filter((m) => m.tgl >= st.dari && m.tgl <= st.sampai).map((m) => [m.cabang, m.no_faktur, m.tgl, m.jenis === "KLAIM" ? "Klaim" : BENEFIT_LBL[m.jenis] || m.jenis, m.klaim_ke || "", m.nama, Number(m.qty || 0), Number(m.nilai || 0), m.ref_faktur, m.uang_masuk || "", sahMC(m) ? "Ya" : "Tidak (kemungkinan salah input)"]) },
+      ]);
     };
     if ($("#cTarik")) $("#cTarik").onclick = async (e) => {
       e.target.disabled = true; e.target.textContent = "Menarik…";
