@@ -853,6 +853,31 @@ VIEWS.care = async () => {
     const benefit = mcList.filter((m) => m.jenis !== "KLAIM").reduce((a, m) => a + Number(m.nilai || 0), 0);
     const saldo = danaMasuk - klaim - benefit;
     const nFaktur = (a) => new Set(a.map((m) => m.cabang + "|" + m.no_faktur)).size;
+    // pencapaian per cabang (mengikuti filter tanggal & pencarian); semua cabang tampil termasuk yang nol
+    const perCabang = (() => {
+      const P = {}, idDariHub = {};
+      const kunci = (id, nama) => (id ? "id" + id : "n" + String(nama || "").toUpperCase());
+      const nmCab = (id, nama) => (id && (S.cabang || []).find((c) => c.id === id)?.nama) || nama || "–";
+      const baru = (k, nama) => (P[k] ||= { nama, n: 0, jual: 0, z: 0, svc: 0, berhak: 0, diambil: 0, klaim: 0 });
+      if (isAdmin() && !S.fc) (S.cabang || []).forEach((c) => baru("id" + c.id, c.nama));
+      list.forEach((r) => {
+        if (r.cabang_id) idDariHub[String(r.cabang).toUpperCase()] = r.cabang_id;
+        const x = baru(kunci(r.cabang_id, r.cabang), nmCab(r.cabang_id, r.cabang));
+        const qc = Number(r.harga_jasa_qc || 0);
+        x.n++; if (r.skema === "Z SERIES") x.z += qc; else if (r.skema === "CARE SERVICE") x.svc += qc; else x.jual += qc;
+        if (r.benefit_jenis) { x.berhak++; if (r.benefit_diambil) x.diambil++; }
+      });
+      const klaimFaktur = new Set();
+      mcList.filter((m) => m.jenis === "KLAIM" && m.tgl >= st.dari && m.tgl <= st.sampai).forEach((m) => {
+        const kf = m.cabang + "|" + m.no_faktur; if (klaimFaktur.has(kf)) return; klaimFaktur.add(kf);
+        const id = idDariHub[String(m.cabang).toUpperCase()];
+        const k = kunci(id, m.cabang); if (!P[k] && !(isAdmin() && !S.fc)) return;
+        baru(k, nmCab(id, m.cabang)).klaim++;
+      });
+      return Object.values(P).map((x) => ({ ...x, total: x.jual + x.z + x.svc })).sort((a, b) => b.total - a.total || a.nama.localeCompare(b.nama));
+    })();
+    const totalQC = perCabang.reduce((a, x) => a + x.total, 0);
+    const maxQC = Math.max(1, ...perCabang.map((x) => x.total));
     const log = isAdmin() ? (await sb.from("log_tarik_hub").select("*").order("waktu", { ascending: false }).limit(1)).data?.[0] : null;
     $("#view").innerHTML = `
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px"><img src="logo-care.png" alt="MFlash CARE" style="height:72px;border-radius:12px"><div class="muted" style="line-height:1.4">Proteksi penjualan unit second, service HP &amp; laptop, dan service Galaxy Z Series</div></div>
@@ -871,6 +896,15 @@ VIEWS.care = async () => {
       <div class="kpi"><div class="lbl">Jasa QC Penjualan</div><div class="val">${rp(qcJual.qc)}</div><div class="sub">${qcJual.n} faktur penjualan unit</div></div>
       <div class="kpi"><div class="lbl">Jasa QC Service Z Series</div><div class="val">${rp(qcZ.qc)}</div><div class="sub">${qcZ.n} faktur servis Z Fold / Z Flip</div></div>
       <div class="kpi"><div class="lbl">Jasa QC Service Non Z Series</div><div class="val">${rp(qcSvc.qc)}</div><div class="sub">${qcSvc.n} faktur CARE Service HP &amp; laptop</div></div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px"><h3 style="margin:0">Pencapaian per cabang</h3><span class="muted">${tgl(st.dari)} – ${tgl(st.sampai)} · urut dari Jasa QC terbesar</span></div>
+      <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Cabang</th><th class="num">Faktur</th><th class="num">Jasa QC Gadget Second</th><th class="num">Jasa QC Z Series</th><th class="num">Jasa QC CARE Service</th><th class="num">Total Jasa QC</th><th style="min-width:140px">Kontribusi</th><th class="num">Benefit diambil</th><th class="num">Klaim dilayani</th></tr></thead><tbody>
+      ${perCabang.map((x, i) => `<tr style="${x.n ? "" : "color:var(--ink-2)"}"><td>${i + 1}</td><td><b>${esc(x.nama)}</b></td><td class="num">${x.n}</td><td class="num">${rp(x.jual)}</td><td class="num">${rp(x.z)}</td><td class="num">${rp(x.svc)}</td><td class="num"><b>${rp(x.total)}</b></td>
+        <td><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;height:8px;background:#E8EEF8;border-radius:4px;overflow:hidden"><div style="width:${(x.total / maxQC) * 100}%;height:100%;background:#F7891A"></div></div><small style="white-space:nowrap">${totalQC ? ((x.total / totalQC) * 100).toLocaleString("id-ID", { maximumFractionDigits: 1 }) : 0}%</small></div></td>
+        <td class="num">${x.berhak ? `${x.diambil} / ${x.berhak}` : "–"}</td><td class="num">${x.klaim}</td></tr>`).join("")}
+      </tbody><tfoot><tr><th></th><th>Total</th><th class="num">${perCabang.reduce((a, x) => a + x.n, 0)}</th><th class="num">${rp(perCabang.reduce((a, x) => a + x.jual, 0))}</th><th class="num">${rp(perCabang.reduce((a, x) => a + x.z, 0))}</th><th class="num">${rp(perCabang.reduce((a, x) => a + x.svc, 0))}</th><th class="num">${rp(totalQC)}</th><th></th><th class="num">${perCabang.reduce((a, x) => a + x.diambil, 0)} / ${perCabang.reduce((a, x) => a + x.berhak, 0)}</th><th class="num">${perCabang.reduce((a, x) => a + x.klaim, 0)}</th></tr></tfoot></table></div>
+      <small class="muted">Benefit diambil = faktur yang benefitnya sudah diberikan / faktur yang berhak benefit. Klaim dilayani = jumlah faktur klaim (MC1-MF, MC2-MF, …) yang diinput cabang tersebut pada rentang tanggal ini.</small>
     </div>
     <div class="toolbar">
       <label>Dari <input type="date" id="cDari" value="${st.dari}"></label>
