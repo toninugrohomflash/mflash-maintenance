@@ -729,6 +729,7 @@ const skemaBadge = (s) => s === "Z SERIES" ? '<span class="badge" style="backgro
   : s === "CARE SERVICE" ? '<span class="badge" style="background:#F7891A;color:#fff">CARE Service</span>'
   : '<span class="badge" style="background:#E8EEF8;color:#13285C">Penjualan</span>';
 const BENEFIT_LBL = { "HYDROGEL": "Pergantian hydrogel", "MOUSE WIRELESS": "Mouse wireless", "KABEL DATA TYPE C": "Kabel data Type C", "AKSESORIS": "Aksesoris (harga di bawah Jasa QC)" };
+const aturanBadge = (r) => r.aturan === "BARU" ? '<span class="badge" style="background:#FFF4E8;color:#C9660A;border:1px solid #F7891A">Baru</span>' : '<span class="badge b-mute">Lama</span>';
 const KUOTA_KLAIM = (r) => !r ? null : r.skema === "Z SERIES" ? 1 : r.skema === "CARE SERVICE" ? (r.perangkat === "HP" ? 3 : 1) : (r.perangkat === "HP" ? 5 : 1);
 const lblKlaim = (m) => m.klaim_ke ? `Klaim ke-${m.klaim_ke}` : "Klaim";
 async function detailCare(r, kembali) {
@@ -743,14 +744,26 @@ async function detailCare(r, kembali) {
   const sn = r.sn_valid === false ? `<span style="color:#C62828;font-weight:700">${r.sn_imei ? esc(r.sn_imei) : "(kosong)"}</span><small style="color:#C62828">${esc(r.sn_catatan || "")}</small>` : v(r.sn_imei);
   const kv = (rows) => `<table class="kvt">${rows.map(([k, x]) => `<tr><th>${k}</th><td>${x}</td></tr>`).join("")}</table>`;
   const kuota = r.skema === "Z SERIES" ? "Sparepart & jasa: 1x klaim / 1 tahun"
+    : r.skema === "CARE SERVICE" && r.aturan === "BARU" ? (r.perangkat === "HP" ? "Sparepart & jasa digabung: maks 3x klaim (3 nota) / 5 tahun" : "Sparepart & jasa digabung: maks 1x klaim (1 nota) / 1 tahun")
     : r.skema === "CARE SERVICE" ? (r.perangkat === "HP" ? "Jasa servis: maks 3x klaim (3 nota) / 5 tahun · sparepart ditanggung selama garansi" : "Jasa servis: maks 1x klaim (1 nota) / 1 tahun · sparepart ditanggung selama garansi")
     : (r.perangkat === "HP" ? "Jasa servis: maks 5x klaim / 5 tahun · sparepart 1x klaim / 1 tahun" : "Jasa servis: maks 1x klaim / 1 tahun · sparepart 1x klaim / 1 tahun");
-  const ben = !r.benefit_jenis ? '<p class="muted">Skema ini tidak memiliki benefit barang.</p>'
+  const tierSvc = (qc) => qc < 10000 ? "Jasa QC di bawah Rp 10.000: tanpa benefit barang" : qc <= 50000 ? "Jasa QC Rp 10.000–50.000: laptop mouse pad / HP aksesoris (modal maks. Rp 5.000)" : "Jasa QC di atas Rp 50.000: kabel Luna Type C (modal Rp 8.300)";
+  const benBaru = () => {
+    const ok = !!r.benefit_barang;
+    const jud = r.skema === "CARE SERVICE" ? tierSvc(Number(r.jasa_qc_awal || 0)) : (BENEFIT_LBL[r.benefit_jenis] || r.benefit_jenis || "Tanpa benefit barang");
+    return `<div style="padding:14px 16px;border-radius:12px;border:1px solid ${!r.benefit_jenis ? "var(--line)" : ok && !r.benefit_catatan ? "#2E7D32" : "#E65100"};background:${!r.benefit_jenis ? "var(--surface)" : ok && !r.benefit_catatan ? "#EDF7EE" : "#FFF3E0"}">
+      <div style="margin-bottom:6px">${aturanBadge(r)} <small class="muted">benefit digabung di faktur utama</small></div>
+      <div style="font-weight:700;font-size:16px">${esc(jud)}</div>
+      ${kv([["Jasa QC awal", rp(r.jasa_qc_awal || 0)], ["Barang benefit di faktur", ok ? esc(r.benefit_barang) : "–"], ["Harga modal barang", ok ? rp(r.benefit_modal || 0) : "–"], ["Jasa QC setelah dikurangi", rp(r.harga_jasa_qc || 0)], ["Status", !r.benefit_jenis ? (ok ? '<span class="badge b-warn">Tidak berhak benefit</span>' : "–") : ok ? '<span class="badge b-good">Sudah diberikan</span>' : '<span class="badge b-warn">Belum ada barang benefit di faktur</span>']])}
+      ${r.benefit_catatan ? `<div style="color:#C62828;font-weight:600;margin-top:6px">⚠ ${esc(r.benefit_catatan)}</div>` : ""}
+      <small>Barang benefit diinput di faktur utama sesuai nama barangnya sebesar harga modal; Jasa QC dikurangi sebesar harga modal tersebut (kalkulator ARM).</small></div>`;
+  };
+  const ben = r.aturan === "BARU" ? benBaru() : !r.benefit_jenis ? '<p class="muted">Skema ini tidak memiliki benefit barang.</p>'
     : `<div style="padding:14px 16px;border-radius:12px;border:1px solid ${r.benefit_diambil ? "#2E7D32" : "#E65100"};background:${r.benefit_diambil ? "#EDF7EE" : "#FFF3E0"}">
         <div style="font-weight:700;font-size:16px">${BENEFIT_LBL[r.benefit_jenis] || esc(r.benefit_jenis)}${r.benefit_jenis === "HYDROGEL" && (r.skema === "Z SERIES" || /Z\s*(FOLD|FLIP)/i.test(r.nama_produk || "")) ? " layar depan" : ""}</div>
         <div style="margin-top:4px">${r.benefit_diambil ? `<span class="badge b-good">Sudah diambil</span> · faktur <b>${esc(r.benefit_faktur)}</b> · ${tgl(r.benefit_tgl)} · ${esc(r.benefit_cabang)}` : `<span class="badge b-warn">Belum diambil</span> · belum ada faktur MC-MF dengan produk ${BENEFIT_LBL[r.benefit_jenis] ? BENEFIT_LBL[r.benefit_jenis].toLowerCase() : ""} untuk nomor faktur ini`}</div>
         ${r.benefit_catatan ? `<div style="color:#C62828;font-weight:600;margin-top:6px">⚠ ${esc(r.benefit_catatan)}</div>` : ""}
-        <small>Sah bila faktur bernomor MC-…${esc(r.no_faktur)}, uang masuk melalui MFlash CARE, dan memuat produk benefit (nama produk berawalan BN). CARE Service: 1 pcs aksesoris dengan harga di bawah nilai Jasa QC faktur ini${r.skema === "CARE SERVICE" ? ` (di bawah ${rp(r.harga_jasa_qc || 0)})` : ""}. Faktur klaim memakai MC1-MF, MC2-MF, dst. sesuai urutan klaim.</small></div>`;
+        <div style="margin-bottom:6px">${aturanBadge(r)} <small class="muted">benefit di faktur terpisah MC-MF</small></div><small>Sah bila faktur bernomor MC-…${esc(r.no_faktur)}, uang masuk melalui MFlash CARE, dan memuat produk benefit. CARE Service: 1 pcs aksesoris dengan harga di bawah nilai Jasa QC faktur ini${r.skema === "CARE SERVICE" ? ` (di bawah ${rp(r.harga_jasa_qc || 0)})` : ""}. Faktur klaim memakai MC1-MF, MC2-MF, dst. sesuai urutan klaim.</small></div>`;
   const mcGrup = {};
   (mc || []).forEach((m) => { (mcGrup[m.cabang + "|" + m.no_faktur] ||= []).push(m); });
   const riw = Object.keys(mcGrup).length ? Object.values(mcGrup).map((g) => `<div style="margin-bottom:12px"><b>${esc(g[0].no_faktur)}</b> · ${tgl(g[0].tgl)} · ${esc(g[0].cabang)} · uang masuk: ${(!g[0].uang_masuk || /mflash\s*care/i.test(g[0].uang_masuk)) && /^MC\d*[\s.\-]/i.test(g[0].no_faktur || "") ? (g[0].uang_masuk ? esc(g[0].uang_masuk) : "(tidak terkirim dari Data Hub – dianggap MFlash CARE sementara)") : `<span style="color:#C62828;font-weight:700">${g[0].uang_masuk ? esc(g[0].uang_masuk) : "(kosong)"} – tidak dihitung, kemungkinan salah input</span>`}
@@ -759,12 +772,12 @@ async function detailCare(r, kembali) {
   const tabs = {
     info: kv([["Cabang", esc(r.cabang)], ["No. faktur", `<b>${esc(r.no_faktur)}</b>`], ["Tanggal faktur", tgl(r.tgl)], ["Nama pelanggan", v(r.nama_pelanggan)], ["Kategori penjualan", esc(r.kategori)], ["Skema", skemaBadge(r.skema)], ["Perangkat", v(r.perangkat)], ["Kondisi unit", v(r.kondisi_unit)], ["Nama produk", v(r.nama_produk)], ["SN / IMEI", sn], ["Harga produk", v(r.harga_produk, rp)], ["Harga Jasa QC", v(r.harga_jasa_qc, rp)], ["Total faktur", v(r.total_faktur, rp)]]),
     rinci: (rinci || []).length ? `<table><thead><tr><th>#</th><th>Nama barang</th><th>SN / IMEI</th><th class="num">Qty</th><th class="num">@Harga</th><th class="num">Total</th></tr></thead><tbody>${rinci.map((b) => `<tr><td>${b.baris}</td><td>${esc(b.nama)}${/^JASA QC/i.test(b.nama || "") ? ' <span class="badge b-brand">CARE</span>' : ""}</td><td>${v(b.sn)}</td><td class="num">${v(b.qty)}</td><td class="num">${v(b.harga, rp)}</td><td class="num">${v(b.nilai, rp)}</td></tr>`).join("")}</tbody></table>` : '<p class="muted">Rincian barang belum tersedia, tekan "Tarik sekarang".</p>',
-    proteksi: kv([["Mulai berlaku", tgl(r.tgl)], ["Proteksi berakhir", `${v(r.garansi_sd, tgl)} ${status(r.garansi_sd)}`], ["Jasa servis gratis s/d", `${v(r.jasa_sd, tgl)} ${status(r.jasa_sd)}`], ["Kuota klaim", kuota], ["Lokasi klaim", "Seluruh cabang MFlash"]]),
+    proteksi: kv([["Mulai berlaku", tgl(r.tgl)], ["Proteksi berakhir", `${v(r.garansi_sd, tgl)} ${status(r.garansi_sd)}`], ["Jasa servis gratis s/d", `${v(r.jasa_sd, tgl)} ${status(r.jasa_sd)}`], ["Kuota klaim", kuota], ["Lokasi klaim", r.skema === "CARE SERVICE" && r.aturan === "BARU" ? `Wajib di cabang ${esc(r.cabang)} oleh teknisi yang mengerjakan servis pertama kali` : r.skema === "Z SERIES" ? "Teknisi Z Series yang ditunjuk" : "Seluruh cabang MFlash"]]),
     benefit: ben,
     mc: riw,
   };
   const label = { info: "Info faktur", rinci: "Rincian barang", proteksi: "Masa proteksi", benefit: "Benefit", mc: "Klaim & benefit (MC-MF)" };
-  modal(`Faktur ${r.no_faktur}`, `${kembali ? '<button class="btn" id="dBack" style="margin-bottom:10px">‹ Kembali ke daftar klaim &amp; benefit</button>' : ""}<div class="tabs" id="dTabs">${Object.keys(label).map((k, i) => `<button data-t="${k}" class="${i ? "" : "on"}">${label[k]}${k === "benefit" && r.benefit_jenis ? (r.benefit_diambil ? " ✓" : " •") : ""}</button>`).join("")}</div><div id="dBody" style="padding-top:14px">${tabs.info}</div>`, (el) => {
+  modal(`Faktur ${r.no_faktur}`, `${kembali ? '<button class="btn" id="dBack" style="margin-bottom:10px">‹ Kembali ke daftar klaim &amp; benefit</button>' : ""}<div class="tabs" id="dTabs">${Object.keys(label).map((k, i) => `<button data-t="${k}" class="${i ? "" : "on"}">${label[k]}${k === "benefit" && r.benefit_jenis ? (r.benefit_diambil && !r.benefit_catatan ? " ✓" : " •") : ""}</button>`).join("")}</div><div id="dBody" style="padding-top:14px">${tabs.info}</div>`, (el) => {
     el.closest(".modal-card").style.maxWidth = "860px";
     if (kembali) $("#dBack").onclick = kembali;
     $$("#dTabs button").forEach((b) => (b.onclick = () => { $$("#dTabs button").forEach((x) => x.classList.toggle("on", x === b)); $("#dBody").innerHTML = tabs[b.dataset.t]; }));
@@ -830,11 +843,12 @@ function daftarMC(awal, mcSah, mcSalah, semuaQC) {
         : !m.klaim_ke ? `Klaim<small style="color:#C62828">tanpa nomor urut (harus MC1-MF, MC2-MF, …)</small>`
         : kuota && m.klaim_ke > kuota ? `<span style="color:#C62828;font-weight:700">Klaim ke-${m.klaim_ke}</span><small style="color:#C62828">melebihi kuota ${kuota}x</small>`
         : `Klaim ke-${m.klaim_ke}${kuota ? `<small>dari kuota ${kuota}x</small>` : ""}`;
-      const lebih = m.jenis !== "KLAIM" && a && a.skema === "CARE SERVICE" && nilai >= Number(a.harga_jasa_qc || 0);
+      const lebih = m.jenis !== "KLAIM" && a && a.skema === "CARE SERVICE" && a.aturan !== "BARU" && nilai >= Number(a.harga_jasa_qc || 0);
+      const salahCab = m.jenis === "KLAIM" && a && a.skema === "CARE SERVICE" && a.aturan === "BARU" && a.cabang !== m.cabang;
       const qc = a ? `<span class="badge b-good">Ada</span> ${rp(a.harga_jasa_qc)}<small>${esc(a.cabang)} · ${tgl(a.tgl)}${a.nama_pelanggan ? " · " + esc(a.nama_pelanggan) : ""}</small>`
         : `<span style="color:#C62828;font-weight:700">Tidak ada</span><small style="color:#C62828">faktur asal tidak ditemukan / tidak memuat Jasa QC</small>`;
       return `<tr data-g="${ix}" style="${a ? "cursor:pointer" : ""}">
-        <td>${esc(m.cabang)}</td><td><b>${esc(m.no_faktur)}</b>${m.uang_masuk ? `<small>uang masuk: ${esc(m.uang_masuk)}</small>` : ""}</td><td>${tgl(m.tgl)}</td><td>${jenis}</td>
+        <td>${salahCab ? `<span style="color:#C62828;font-weight:700">${esc(m.cabang)}</span><small style="color:#C62828">klaim CARE Service wajib di cabang servis awal (${esc(a.cabang)})</small>` : esc(m.cabang)}</td><td><b>${esc(m.no_faktur)}</b>${m.uang_masuk ? `<small>uang masuk: ${esc(m.uang_masuk)}</small>` : ""}</td><td>${tgl(m.tgl)}</td><td>${jenis}</td>
         <td>${g.map((b) => esc(b.nama)).join("<br>")}</td>
         <td class="num">${lebih ? `<span style="color:#C62828;font-weight:700" title="Nilai benefit harus di bawah Jasa QC">${rp(nilai)}</span><small style="color:#C62828">tidak di bawah Jasa QC</small>` : rp(nilai)}</td><td>${a ? `<b style="color:var(--brand)">${esc(m.ref_faktur)}</b>` : esc(m.ref_faktur || "–")}</td><td>${qc}</td></tr>`;
     }).join("")}</tbody></table></div>`;
@@ -865,7 +879,7 @@ function daftarMC(awal, mcSah, mcSalah, semuaQC) {
 }
 
 VIEWS.care = async () => {
-  const st = { dari: bulanIni(), sampai: today(), cari: "" };
+  const st = { dari: bulanIni(), sampai: today(), cari: "", aturan: "semua" };
   const isi = (v, f) => (v === null || v === undefined || v === "" ? "–" : f ? f(v) : esc(v));
   const hariIni = today();
   const sisa = (d) => d ? Math.round((new Date(d) - new Date(hariIni)) / 86400000) : null;
@@ -887,13 +901,20 @@ VIEWS.care = async () => {
   async function draw() {
     const rows = await ambilSemua(() => q("mflash_care").gte("tgl", st.dari).lte("tgl", st.sampai).order("tgl", { ascending: false }).order("no_faktur"));
     const k = st.cari.trim().toUpperCase();
-    const list = k ? rows.filter((r) => [r.no_faktur, r.cabang, r.nama_pelanggan, r.nama_produk, r.sn_imei].some((v) => String(v || "").toUpperCase().includes(k))) : rows;
+    const listCari = k ? rows.filter((r) => [r.no_faktur, r.cabang, r.nama_pelanggan, r.nama_produk, r.sn_imei].some((v) => String(v || "").toUpperCase().includes(k))) : rows;
+    const isBaru = (r) => r.aturan === "BARU";
+    const list = st.aturan === "semua" ? listCari : listCari.filter((r) => (st.aturan === "baru") === isBaru(r));
+    // ringkasan aturan lama vs baru (mengikuti filter tanggal & pencarian, tidak terpengaruh pilihan aturan)
+    const ringkas = (L) => ({ n: L.length, qc: L.reduce((a, r) => a + Number(r.harga_jasa_qc || 0), 0), berhak: L.filter((r) => r.benefit_jenis).length, diambil: L.filter((r) => r.benefit_jenis && r.benefit_diambil).length, salah: L.filter((r) => r.benefit_catatan).length, modal: L.reduce((a, r) => a + (isBaru(r) ? Number(r.benefit_modal || 0) : 0), 0) });
+    const rLama = ringkas(listCari.filter((r) => !isBaru(r))), rBaru = ringkas(listCari.filter(isBaru));
+    const mulaiBaru = {};
+    rows.filter(isBaru).forEach((r) => { if (!mulaiBaru[r.cabang] || r.tgl < mulaiBaru[r.cabang]) mulaiBaru[r.cabang] = r.tgl; });
     const sum = (f) => list.reduce((a, r) => a + Number(r[f] || 0), 0);
     const perSkema = (sk) => { const x = list.filter((r) => (r.skema || "PENJUALAN") === sk); return { n: x.length, qc: x.reduce((a, r) => a + Number(r.harga_jasa_qc || 0), 0) }; };
     const qcJual = perSkema("PENJUALAN"), qcZ = perSkema("Z SERIES"), qcSvc = perSkema("CARE SERVICE");
     // saldo kumulatif (sejak awal program, tidak terpengaruh filter tanggal)
     const [semuaQC, semuaMC] = await Promise.all([
-      ambilSemua(() => q("mflash_care", "cabang,cabang_id,no_faktur,tgl,nama_pelanggan,kategori,skema,perangkat,harga_jasa_qc,total_faktur").order("tgl", { ascending: false }).order("no_faktur")),
+      ambilSemua(() => q("mflash_care", "cabang,cabang_id,no_faktur,tgl,nama_pelanggan,kategori,skema,perangkat,harga_jasa_qc,total_faktur,aturan").order("tgl", { ascending: false }).order("no_faktur")),
       ambilSemua(() => sb.from("mflash_care_mc").select("*").order("tgl", { ascending: false }).order("no_faktur").order("baris")),
     ]);
     const milikSaya = new Set((semuaQC || []).map((r) => r.no_faktur));
@@ -942,6 +963,23 @@ VIEWS.care = async () => {
       <div class="mc-klik" data-t="klaim" style="cursor:pointer" title="Klik untuk melihat daftar faktur klaim"><div style="font-size:13px;opacity:.8">Klaim (MC-MF + uang masuk MFlash CARE)</div><div style="font-size:20px;font-weight:700">− ${rp(klaim)}</div><div style="font-size:12px;color:#FFB15C;text-decoration:underline">${nFaktur(mcList.filter((m) => m.jenis === "KLAIM"))} faktur · lihat rincian ›</div></div>
       <div class="mc-klik" data-t="benefit" style="cursor:pointer" title="Klik untuk melihat daftar faktur benefit"><div style="font-size:13px;opacity:.8">Benefit (MC-MF + uang masuk MFlash CARE)</div><div style="font-size:20px;font-weight:700">− ${rp(benefit)}</div><div style="font-size:12px;color:#FFB15C;text-decoration:underline">${nFaktur(mcList.filter((m) => m.jenis !== "KLAIM"))} faktur · lihat rincian ›</div></div>
     </div>
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px"><h3 style="margin:0">Aturan lama vs aturan baru</h3>
+        <span class="spacer"></span>
+        <div class="tabs" id="cAturan" style="margin:0">${[["semua", "Semua"], ["lama", "Aturan lama"], ["baru", "Aturan baru"]].map(([k2, l]) => `<button data-a="${k2}" class="${st.aturan === k2 ? "on" : ""}">${l}</button>`).join("")}</div></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">
+        ${[["lama", "Aturan lama", "Benefit di faktur terpisah MC-MF", rLama, "#33456E", "#E9ECF4"], ["baru", "Aturan baru", "Benefit digabung di faktur utama, Jasa QC dikurangi harga modal barang", rBaru, "#C9660A", "#FFF4E8"]].map(([k2, jud, sub, x, w, bg]) => `
+        <div class="atr-klik" data-a="${k2}" style="cursor:pointer;border:2px solid ${w};background:${bg};border-radius:14px;padding:14px 16px">
+          <div style="font-weight:800;color:${w}">${jud}</div><small class="muted">${sub}</small>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;margin-top:8px;font-size:14px">
+            <div>Faktur<br><b style="font-size:18px">${x.n}</b></div><div>Jasa QC${k2 === "baru" ? " (setelah dikurangi)" : ""}<br><b style="font-size:18px">${rp(x.qc)}</b></div>
+            <div>Benefit diberikan<br><b>${x.diambil} / ${x.berhak}</b></div>
+            ${k2 === "baru" ? `<div>Modal barang benefit<br><b>${rp(x.modal)}</b></div>` : `<div>&nbsp;</div>`}
+            <div style="grid-column:1/-1">${x.salah ? `<span style="color:#C62828;font-weight:700">⚠ ${x.salah} faktur ${k2 === "baru" ? "benefit tidak sesuai tier" : "benefit tidak sesuai ketentuan"}</span>` : `<span class="muted">Tidak ada catatan</span>`}</div>
+          </div></div>`).join("")}
+      </div>
+      <small class="muted" style="display:block;margin-top:8px">Aturan baru berlaku per cabang mulai faktur CARE Service pertama yang memuat barang benefit seharga modal di faktur utama${Object.keys(mulaiBaru).length ? ": " + Object.entries(mulaiBaru).sort((a, b) => a[1].localeCompare(b[1])).map(([c, t]) => `<b>${esc(c)}</b> sejak ${tgl(t)}`).join(", ") : " (belum ada cabang pada rentang ini)"}. Cabang lain masih dihitung dengan aturan lama. Pilihan di kanan atas menyaring seluruh angka di bawahnya.</small>
+    </div>
     <div class="kpis">
       <div class="kpi rk-klik" data-k="faktur" style="cursor:pointer" title="Klik untuk melihat rincian"><div class="lbl">Faktur MFlash CARE <span style="color:var(--brand)">›</span></div><div class="val">${list.length}</div><div class="sub">${tgl(st.dari)} – ${tgl(st.sampai)}</div></div>
       <div class="kpi rk-klik" data-k="qc" style="cursor:pointer" title="Klik untuk melihat rincian"><div class="lbl">Total Jasa QC <span style="color:var(--brand)">›</span></div><div class="val">${rp(sum("harga_jasa_qc"))}</div><div class="sub">porsi Dana MFlash CARE</div></div>
@@ -973,10 +1011,10 @@ VIEWS.care = async () => {
       Garansi dihitung dari tanggal faktur sesuai juklak: penjualan laptop 1 tahun, penjualan HP 1 tahun (jasa servis s/d 5 tahun), CARE Service laptop 1 tahun / HP 5 tahun, Z Series 1 tahun.
       ${log ? `<br>Tarikan terakhir: ${new Date(log.waktu).toLocaleString("id-ID")} · ${log.ok ? "berhasil" : "gagal"} · ${log.jml_simpan ?? 0} faktur CARE dari ${log.jml_hub ?? 0} faktur${log.ok ? "" : " · " + esc(log.pesan)}` : ""}</p>
     <div class="tbl-wrap">${list.length ? `<table class="tbl-klik"><thead><tr>
-      <th>Cabang</th><th>No. faktur</th><th>Tgl faktur</th><th>Nama pelanggan</th><th>Kategori penjualan</th><th>Skema</th><th class="num">Harga Jasa QC</th>
+      <th>Cabang</th><th>No. faktur</th><th>Tgl faktur</th><th>Nama pelanggan</th><th>Kategori penjualan</th><th>Skema</th><th>Aturan</th><th class="num">Harga Jasa QC</th>
     </tr></thead><tbody>${list.map((r, ix) => `<tr data-ix="${ix}" style="cursor:pointer" title="Klik untuk melihat rincian faktur">
       <td>${esc(r.cabang)}</td><td><b style="color:var(--brand)">${esc(r.no_faktur)}</b></td><td>${tgl(r.tgl)}</td><td>${isi(r.nama_pelanggan)}</td>
-      <td>${esc(r.kategori)}</td><td>${skemaBadge(r.skema)}</td><td class="num">${isi(r.harga_jasa_qc, rp)}</td></tr>`).join("")}
+      <td>${esc(r.kategori)}</td><td>${skemaBadge(r.skema)}</td><td>${aturanBadge(r)}</td><td class="num">${isi(r.harga_jasa_qc, rp)}</td></tr>`).join("")}
     </tbody></table>` : `<div class="empty">Belum ada faktur MFlash CARE pada rentang tanggal ini.</div>`}</div>`;
     $$(".tbl-klik tbody tr").forEach((tr) => (tr.onclick = () => detailCare(list[+tr.dataset.ix])));
     const REKAP = {
@@ -988,6 +1026,7 @@ VIEWS.care = async () => {
       z: ["Jasa QC Service Z Series", list.filter((r) => r.skema === "Z SERIES")],
       svc: ["Jasa QC CARE Service HP & Laptop", list.filter((r) => r.skema === "CARE SERVICE")],
     };
+    $$("#cAturan button, .atr-klik").forEach((b) => (b.onclick = () => { st.aturan = b.dataset.a; draw(); }));
     $$(".rk-klik").forEach((d) => (d.onclick = () => daftarRekap(...REKAP[d.dataset.k], d.dataset.k === "nilai" ? "total_faktur" : "harga_jasa_qc")));
     $$(".cab-klik").forEach((d) => (d.onclick = () => { const x = perCabang[+d.dataset.ix]; daftarRekap(`Faktur MFlash CARE cabang ${x.nama}`, list.filter((r) => (r.cabang_id ? "id" + r.cabang_id : "n" + String(r.cabang).toUpperCase()) === x.k), "harga_jasa_qc"); }));
     $$(".mc-klik").forEach((d) => (d.onclick = () => daftarMC(d.dataset.t, mcList, mcSemua.filter((m) => !sahMC(m)), semuaQC || [])));
@@ -996,8 +1035,8 @@ VIEWS.care = async () => {
     $("#cCari").onchange = (e) => { st.cari = e.target.value; draw(); };
     $("#cCsv").onclick = () => {
       unduhExcel(`MFlash_CARE_${st.dari}_sd_${st.sampai}.xlsx`, [
-        { nama: "Faktur", kolom: ["CABANG", "NO FAKTUR", "TANGGAL", "NAMA PELANGGAN", "KATEGORI PENJUALAN", "SKEMA", "PERANGKAT", "KONDISI UNIT", "SN/IMEI", "STATUS SN/IMEI", "NAMA PRODUK", "HARGA PRODUK", "HARGA JASA QC", "TOTAL FAKTUR", "GARANSI BERAKHIR", "JASA SERVIS S/D", "BENEFIT", "STATUS BENEFIT", "FAKTUR BENEFIT"],
-          baris: list.map((r) => [r.cabang, r.no_faktur, r.tgl, r.nama_pelanggan, r.kategori, r.skema, r.perangkat, r.kondisi_unit, r.sn_imei, r.sn_valid === false ? "TIDAK VALID: " + (r.sn_catatan || "") : "OK", r.nama_produk, Number(r.harga_produk || 0), Number(r.harga_jasa_qc || 0), Number(r.total_faktur || 0), r.garansi_sd, r.jasa_sd, BENEFIT_LBL[r.benefit_jenis] || r.benefit_jenis || "", r.benefit_jenis ? (r.benefit_diambil ? "Sudah diambil" : "Belum diambil") : "", r.benefit_faktur || ""]) },
+        { nama: "Faktur", kolom: ["CABANG", "NO FAKTUR", "TANGGAL", "NAMA PELANGGAN", "KATEGORI PENJUALAN", "SKEMA", "PERANGKAT", "KONDISI UNIT", "SN/IMEI", "STATUS SN/IMEI", "NAMA PRODUK", "HARGA PRODUK", "HARGA JASA QC", "TOTAL FAKTUR", "GARANSI BERAKHIR", "JASA SERVIS S/D", "ATURAN", "BENEFIT", "STATUS BENEFIT", "FAKTUR BENEFIT", "BARANG BENEFIT (FAKTUR UTAMA)", "MODAL BENEFIT", "JASA QC AWAL", "CATATAN BENEFIT"],
+          baris: list.map((r) => [r.cabang, r.no_faktur, r.tgl, r.nama_pelanggan, r.kategori, r.skema, r.perangkat, r.kondisi_unit, r.sn_imei, r.sn_valid === false ? "TIDAK VALID: " + (r.sn_catatan || "") : "OK", r.nama_produk, Number(r.harga_produk || 0), Number(r.harga_jasa_qc || 0), Number(r.total_faktur || 0), r.garansi_sd, r.jasa_sd, r.aturan === "BARU" ? "Baru" : "Lama", BENEFIT_LBL[r.benefit_jenis] || r.benefit_jenis || "", r.benefit_jenis ? (r.benefit_diambil ? "Sudah diambil" : "Belum diambil") : "", r.benefit_faktur || "", r.benefit_barang || "", r.benefit_modal != null ? Number(r.benefit_modal) : "", r.jasa_qc_awal != null ? Number(r.jasa_qc_awal) : "", r.benefit_catatan || ""]) },
         { nama: "Per Cabang", kolom: ["CABANG", "FAKTUR", "JASA QC GADGET SECOND", "JASA QC Z SERIES", "JASA QC CARE SERVICE", "TOTAL JASA QC", "BENEFIT DIAMBIL", "BERHAK BENEFIT", "KLAIM DILAYANI"],
           baris: perCabang.map((x) => [x.nama, x.n, x.jual, x.z, x.svc, x.total, x.diambil, x.berhak, x.klaim]) },
         { nama: "Klaim & Benefit MC", kolom: ["CABANG", "NO FAKTUR MC", "TANGGAL", "JENIS", "KLAIM KE", "NAMA PRODUK", "QTY", "NILAI", "ATAS FAKTUR", "UANG MASUK", "DIHITUNG"],
